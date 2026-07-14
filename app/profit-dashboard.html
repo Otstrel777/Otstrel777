@@ -1,0 +1,591 @@
+<title>Дашборд прибыли — Etsy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#FBFAF8; --surface:#FFFFFF; --surface-2:#F4F2EC;
+    --ink:#16201D; --muted:#5E6B66; --faint:#8B958F;
+    --line:#E4E0D6; --line-strong:#D3CEC1;
+    --accent:#0E7C61; --accent-soft:#DCEFE8;
+    --pos:#0E7C61; --neg:#C0433A; --warn:#B8860B;
+    --pos-soft:#DCEFE8; --neg-soft:#F7E1DE; --warn-soft:#F5EAD2;
+    --shadow:0 1px 2px rgba(22,32,29,.04),0 8px 24px rgba(22,32,29,.05);
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0E1513; --surface:#16201D; --surface-2:#1D2724;
+      --ink:#EAF0ED; --muted:#9FACA6; --faint:#75827C;
+      --line:#273330; --line-strong:#33413C;
+      --accent:#2FB48C; --accent-soft:#17322A;
+      --pos:#2FB48C; --neg:#E27A6F; --warn:#D9AC4A;
+      --pos-soft:#14312A; --neg-soft:#3A211E; --warn-soft:#33290F;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#FBFAF8; --surface:#FFFFFF; --surface-2:#F4F2EC;
+    --ink:#16201D; --muted:#5E6B66; --faint:#8B958F;
+    --line:#E4E0D6; --line-strong:#D3CEC1;
+    --accent:#0E7C61; --accent-soft:#DCEFE8;
+    --pos:#0E7C61; --neg:#C0433A; --warn:#B8860B;
+    --pos-soft:#DCEFE8; --neg-soft:#F7E1DE; --warn-soft:#F5EAD2;
+    --shadow:0 1px 2px rgba(22,32,29,.04),0 8px 24px rgba(22,32,29,.05);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1513; --surface:#16201D; --surface-2:#1D2724;
+    --ink:#EAF0ED; --muted:#9FACA6; --faint:#75827C;
+    --line:#273330; --line-strong:#33413C;
+    --accent:#2FB48C; --accent-soft:#17322A;
+    --pos:#2FB48C; --neg:#E27A6F; --warn:#D9AC4A;
+    --pos-soft:#14312A; --neg-soft:#3A211E; --warn-soft:#33290F;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* Header */
+  header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:22px}
+  .brand .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700}
+  .brand h1{font-family:var(--serif);font-weight:600;font-size:30px;margin:4px 0 2px;letter-spacing:-.01em}
+  .brand p{margin:0;color:var(--muted);font-size:14px}
+  .theme-btn{border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);
+    border-radius:9px;padding:8px 12px;font-size:13px;cursor:pointer;font-family:var(--sans)}
+  .theme-btn:hover{color:var(--ink);border-color:var(--accent)}
+
+  /* Cards */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+  .card + .card{margin-top:18px}
+  .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .card-h h2{margin:0;font-size:15px;font-weight:700;letter-spacing:.01em}
+  .card-h .sub{color:var(--faint);font-size:12.5px}
+
+  /* Dropzone */
+  .drop{border:1.5px dashed var(--line-strong);border-radius:14px;background:var(--surface);
+    padding:22px;display:flex;flex-wrap:wrap;align-items:center;gap:16px;justify-content:space-between;transition:.15s}
+  .drop.drag{border-color:var(--accent);background:var(--accent-soft)}
+  .drop .d-txt strong{display:block;font-size:15px}
+  .drop .d-txt span{color:var(--muted);font-size:13px}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:10px;
+    padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--sans)}
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;color:var(--accent)}
+  .btn.ghost:hover{background:var(--accent-soft)}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap}
+
+  /* Data health chips */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;padding:6px 11px;border-radius:99px;
+    background:var(--surface-2);border:1px solid var(--line);color:var(--muted)}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .chip.warn{background:var(--warn-soft);border-color:transparent;color:var(--warn)}
+  .chip.warn .dot{background:var(--warn)}
+
+  /* KPI row */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 16px 15px;box-shadow:var(--shadow)}
+  .kpi .lab{font-size:12px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;font-weight:600}
+  .kpi .val{font-size:26px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+  .kpi .meta{font-size:12.5px;color:var(--faint);margin-top:2px}
+  .kpi.hero{grid-column:span 2;background:linear-gradient(180deg,var(--accent-soft),var(--surface))}
+  .kpi.hero .val{font-size:34px}
+  .val.pos{color:var(--pos)} .val.neg{color:var(--neg)}
+  @media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}.kpi.hero{grid-column:span 2}}
+
+  /* P&L statement */
+  .pnl{padding:8px 20px 18px}
+  .pnl .row{display:grid;grid-template-columns:1fr auto 62px;gap:12px;align-items:baseline;
+    padding:9px 0;border-bottom:1px solid var(--line)}
+  .pnl .row:last-child{border-bottom:none}
+  .pnl .row .name{font-size:14.5px}
+  .pnl .row .amt{font-size:15px;text-align:right}
+  .pnl .row .pct{font-size:12.5px;color:var(--faint);text-align:right}
+  .pnl .row.sub{background:var(--surface-2);margin:4px -20px;padding:11px 20px;border-radius:8px;border-bottom:none}
+  .pnl .row.sub .name{font-weight:700}
+  .pnl .row.sub .amt{font-weight:700}
+  .pnl .row.total{margin-top:6px;border-top:2px solid var(--line-strong);border-bottom:none;padding-top:14px}
+  .pnl .row.total .name{font-family:var(--serif);font-size:18px;font-weight:600}
+  .pnl .row.total .amt{font-size:22px;font-weight:700}
+  .pnl .neg-amt{color:var(--neg)}
+  .pnl .muted-name{color:var(--muted)}
+  .pnl-note{font-size:12.5px;color:var(--faint);padding:2px 20px 16px}
+
+  /* Breakdown bars + tables */
+  .bd{padding:10px 20px 18px}
+  .barrow{display:grid;grid-template-columns:120px 1fr auto;gap:12px;align-items:center;padding:8px 0}
+  .barrow .bl{font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .flag{width:9px;height:9px;border-radius:2px;background:var(--accent);flex:none}
+  .track{height:9px;background:var(--surface-2);border-radius:99px;overflow:hidden}
+  .fill{height:100%;background:var(--accent);border-radius:99px}
+  .barrow .bv{font-size:13px;text-align:right;color:var(--muted)}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tblwrap{overflow-x:auto}
+  th,td{padding:10px 12px;text-align:right;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  thead th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  tbody tr{border-bottom:1px solid var(--line)}
+  tbody tr:last-child{border-bottom:none}
+  td .cogs-in{width:78px;border:1px solid var(--line-strong);background:var(--bg);color:var(--ink);
+    border-radius:7px;padding:5px 7px;font-size:13px;text-align:right;font-family:var(--sans)}
+  td .cogs-in:focus{outline:2px solid var(--accent);outline-offset:0}
+
+  /* Settings */
+  details.settings{margin-top:18px}
+  details.settings > summary{list-style:none;cursor:pointer;padding:16px 20px;background:var(--surface);
+    border:1px solid var(--line);border-radius:14px;display:flex;justify-content:space-between;align-items:center;
+    font-weight:700;font-size:15px;box-shadow:var(--shadow)}
+  details[open].settings > summary{border-radius:14px 14px 0 0}
+  summary::-webkit-details-marker{display:none}
+  summary .caret{color:var(--muted);font-size:13px;font-weight:500}
+  .set-body{border:1px solid var(--line);border-top:none;border-radius:0 0 14px 14px;background:var(--surface);padding:18px 20px}
+  .set-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 22px}
+  @media(max-width:640px){.set-grid{grid-template-columns:1fr}}
+  .fld{display:flex;flex-direction:column;gap:5px}
+  .fld label{font-size:12.5px;color:var(--muted);font-weight:600}
+  .fld .hint{font-size:11.5px;color:var(--faint);font-weight:400}
+  .fld input,.fld select{border:1px solid var(--line-strong);background:var(--bg);color:var(--ink);
+    border-radius:9px;padding:9px 11px;font-size:14px;font-family:var(--sans)}
+  .fld input:focus,.fld select:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+  .seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden}
+  .seg button{border:none;background:var(--bg);color:var(--muted);padding:9px 13px;font-size:13px;cursor:pointer;font-family:var(--sans)}
+  .seg button.on{background:var(--accent);color:#fff;font-weight:600}
+
+  .empty{padding:34px 20px;text-align:center;color:var(--faint);font-size:14px}
+  footer{margin-top:30px;text-align:center;color:var(--faint);font-size:12px}
+  .hidden{display:none!important}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="eyebrow">P&amp;L · Etsy</div>
+      <h1>Дашборд прибыли</h1>
+      <p>Загрузи месячную выгрузку Etsy — увидишь чистую прибыль бизнеса.</p>
+    </div>
+    <button class="theme-btn" id="themeBtn">◐ Тема</button>
+  </header>
+
+  <div class="drop" id="drop">
+    <div class="d-txt">
+      <strong>Перетащи сюда файлы Etsy (.csv)</strong>
+      <span>Order Items · Orders · Payment/Statement — можно несколько сразу, и по разным магазинам</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn" id="pickBtn">Выбрать файлы</button>
+      <button class="btn ghost" id="demoBtn">Показать на демо-данных</button>
+      <input type="file" id="fileInput" accept=".csv" multiple class="hidden">
+    </div>
+  </div>
+  <div class="chips" id="chips"></div>
+
+  <div id="dash" class="hidden">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="card">
+      <div class="card-h">
+        <h2>Отчёт о прибыли (P&amp;L)</h2>
+        <span class="sub" id="pnlCtx">—</span>
+      </div>
+      <div class="pnl" id="pnl"></div>
+      <div class="pnl-note" id="pnlNote"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h2>По странам</h2><span class="sub">выручка и чистая прибыль</span></div>
+      <div class="bd" id="byCountry"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h2>По товарам</h2><span class="sub">впиши себестоимость за штуку — пересчёт сразу</span></div>
+      <div class="tblwrap"><table id="byProduct"></table></div>
+    </div>
+
+    <details class="settings" id="settings">
+      <summary>Настройки затрат <span class="caret">развернуть ▾</span></summary>
+      <div class="set-body">
+        <div class="set-grid">
+          <div class="fld">
+            <label>Комиссии Etsy</label>
+            <div class="seg" id="feeMode">
+              <button data-v="percent" class="on">Оценка, %</button>
+              <button data-v="statement">Из файла Statement</button>
+            </div>
+            <span class="hint">Если загружен Payment/Statement — бери точные комиссии из него.</span>
+          </div>
+          <div class="fld">
+            <label>Ставка комиссии, % от выручки</label>
+            <input type="number" id="s_feePct" step="0.1" value="10.5">
+            <span class="hint">transaction 6.5% + обработка ~4%. Offsite Ads добавь, если есть.</span>
+          </div>
+          <div class="fld">
+            <label>Listing fee за штуку, €</label>
+            <input type="number" id="s_listing" step="0.01" value="0.20">
+          </div>
+          <div class="fld">
+            <label>Себестоимость по умолчанию, € / шт</label>
+            <input type="number" id="s_cogs" step="0.01" value="3.50">
+            <span class="hint">Применяется к товарам без своей цены (в таблице выше).</span>
+          </div>
+          <div class="fld">
+            <label>Реальная доставка, € / заказ</label>
+            <input type="number" id="s_ship" step="0.01" value="2.50">
+          </div>
+          <div class="fld">
+            <label>Постоянные расходы в месяц, €</label>
+            <input type="number" id="s_fixed" step="1" value="50">
+            <span class="hint">Подписки, аренда, тулзы.</span>
+          </div>
+          <div class="fld">
+            <label>Оплата труда, € / заказ</label>
+            <input type="number" id="s_labor" step="0.01" value="0">
+            <span class="hint">Твоё время как расход (MBA-модель). Оставь 0, если не считаешь.</span>
+          </div>
+          <div class="fld">
+            <label>Валюта отображения</label>
+            <select id="s_cur">
+              <option value="EUR">€ Евро</option>
+              <option value="USD">$ Доллар</option>
+              <option value="GBP">£ Фунт</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:18px">
+          <button class="btn ghost" id="resetBtn">Сбросить данные и настройки</button>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <footer>Все расчёты идут в твоём браузере. Файлы никуда не отправляются.</footer>
+</div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+
+/* ---------- Theme ---------- */
+$("#themeBtn").onclick=()=>{
+  const r=document.documentElement;
+  const cur=r.getAttribute("data-theme")|| (matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
+  r.setAttribute("data-theme", cur==="dark"?"light":"dark");
+};
+
+/* ---------- Settings (persisted) ---------- */
+const DEF={feeMode:"percent",feePct:10.5,listing:0.20,cogs:3.50,ship:2.50,fixed:50,labor:0,cur:"EUR"};
+let SET=load("etsy_pnl_settings",{...DEF});
+let PROD_COGS=load("etsy_pnl_prodcogs",{});   // productName -> €/unit
+function load(k,f){try{return {...f,...JSON.parse(localStorage.getItem(k)||"{}")}}catch(e){return {...f}}}
+function save(){localStorage.setItem("etsy_pnl_settings",JSON.stringify(SET));
+  localStorage.setItem("etsy_pnl_prodcogs",JSON.stringify(PROD_COGS));}
+
+function bindSettings(){
+  $("#s_feePct").value=SET.feePct; $("#s_listing").value=SET.listing;
+  $("#s_cogs").value=SET.cogs; $("#s_ship").value=SET.ship;
+  $("#s_fixed").value=SET.fixed; $("#s_labor").value=SET.labor; $("#s_cur").value=SET.cur;
+  $$("#feeMode button").forEach(b=>b.classList.toggle("on",b.dataset.v===SET.feeMode));
+  const map={s_feePct:"feePct",s_listing:"listing",s_cogs:"cogs",s_ship:"ship",s_fixed:"fixed",s_labor:"labor"};
+  Object.keys(map).forEach(id=>$("#"+id).oninput=e=>{SET[map[id]]=parseFloat(e.target.value)||0;save();render();});
+  $("#s_cur").onchange=e=>{SET.cur=e.target.value;save();render();};
+  $$("#feeMode button").forEach(b=>b.onclick=()=>{SET.feeMode=b.dataset.v;bindSettings();save();render();});
+  $("#resetBtn").onclick=()=>{if(confirm("Удалить загруженные данные и сбросить настройки?")){
+    localStorage.clear();location.reload();}};
+}
+
+/* ---------- CSV parser (quotes-aware) ---------- */
+function parseCSV(text){
+  const rows=[];let f="",row=[],q=false;
+  text=text.replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false;} else f+=c; }
+    else{ if(c==='"')q=true; else if(c===','){row.push(f);f="";}
+      else if(c==='\n'){row.push(f);rows.push(row);row=[];f="";} else f+=c; }
+  }
+  if(f.length||row.length){row.push(f);rows.push(row);}
+  if(!rows.length)return{headers:[],data:[]};
+  const headers=rows[0].map(h=>h.trim());
+  const data=rows.slice(1).filter(r=>r.some(v=>v&&v.trim()!=="")).map(r=>{
+    const o={};headers.forEach((h,i)=>o[h]=(r[i]??"").trim());return o;});
+  return{headers,data};
+}
+function findCol(headers,cands){
+  const low=headers.map(h=>h.toLowerCase());
+  for(const c of cands){const i=low.indexOf(c.toLowerCase());if(i>=0)return headers[i];}
+  for(const c of cands){const i=low.findIndex(h=>h.includes(c.toLowerCase()));if(i>=0)return headers[i];}
+  return null;
+}
+const num=v=>{if(v==null)return 0;let s=String(v).replace(/[^0-9.,\-]/g,"");
+  if(s.includes(",")&&s.includes(".")){s=s.replace(/,/g,"");}
+  else if(s.includes(",")&&!s.includes(".")){s=s.replace(",",".");}
+  return parseFloat(s)||0;};
+
+/* ---------- State ---------- */
+let STATE={items:[],feesFromStatement:null,files:[],currency:null,months:new Set(),stores:new Set()};
+
+function detectType(headers){
+  const h=headers.map(x=>x.toLowerCase());
+  const has=k=>h.some(x=>x.includes(k));
+  if(has("type")&&(has("fees")||has("net"))&&has("amount"))return "statement";
+  if((has("item name")||has("listing id")||has("sku"))&&has("quantity"))return "items";
+  if(has("order id")||has("order value")||has("number of items"))return "orders";
+  return "unknown";
+}
+
+function ingest(name,text){
+  const{headers,data}=parseCSV(text);
+  const type=detectType(headers);
+  const store=name.replace(/\.csv$/i,"");
+  const f={name,type,rows:data.length,cols:headers};
+  STATE.files.push(f);
+  if(type==="items"||type==="orders"){
+    const C={
+      oid:findCol(headers,["Order ID","Order Id","Receipt ID"]),
+      item:findCol(headers,["Item Name","Title","Listing Title"]),
+      sku:findCol(headers,["SKU"]),
+      qty:findCol(headers,["Quantity","Number of Items"]),
+      price:findCol(headers,["Price","Item Price"]),
+      itotal:findCol(headers,["Item Total"]),
+      oval:findCol(headers,["Order Value","Order Total"]),
+      ship:findCol(headers,["Order Shipping","Shipping"]),
+      disc:findCol(headers,["Discount Amount","Discount"]),
+      tax:findCol(headers,["Order Sales Tax","Sales Tax","Tax"]),
+      country:findCol(headers,["Ship Country","Country"]),
+      date:findCol(headers,["Sale Date","Date Paid","Date"]),
+      cur:findCol(headers,["Currency"]),
+    };
+    f.mapped=C;
+    data.forEach(r=>{
+      const qty=C.qty?Math.max(1,Math.round(num(r[C.qty]))):1;
+      const price=C.price?num(r[C.price]):0;
+      const itotal=C.itotal?num(r[C.itotal]):(price*qty);
+      STATE.items.push({
+        store, oid:C.oid?r[C.oid]:name+"-"+STATE.items.length,
+        item:(C.item?r[C.item]:"(без названия)").slice(0,80)||"(без названия)",
+        sku:C.sku?r[C.sku]:"", qty,
+        rev: itotal||price*qty,
+        ship:C.ship?num(r[C.ship]):0,
+        disc:C.disc?num(r[C.disc]):0,
+        tax:C.tax?num(r[C.tax]):0,
+        oval:C.oval?num(r[C.oval]):0,
+        country:(C.country?r[C.country]:"—")||"—",
+        date:C.date?r[C.date]:"",
+      });
+      if(C.cur&&r[C.cur])STATE.currency=r[C.cur];
+      if(C.date&&r[C.date])STATE.months.add(String(r[C.date]).slice(0,7));
+    });
+    STATE.stores.add(store);
+  }
+  if(type==="statement"){
+    const typeCol=findCol(headers,["Type"]);
+    const feeCol=findCol(headers,["Fees & Taxes","Fees and Taxes","Fee"]);
+    const amtCol=findCol(headers,["Amount"]);
+    let fees=0, ads=0;
+    data.forEach(r=>{
+      const t=(typeCol?r[typeCol]:"").toLowerCase();
+      const fee=feeCol?Math.abs(num(r[feeCol])):0;
+      const amt=amtCol?Math.abs(num(r[amtCol])):0;
+      if(t.includes("market")||t.includes("ads"))ads+=amt;
+      else fees+=fee;
+    });
+    STATE.feesFromStatement=(STATE.feesFromStatement||0)+fees+ads;
+  }
+}
+
+/* ---------- Demo data ---------- */
+function loadDemo(){
+  STATE={items:[],feesFromStatement:null,files:[],currency:"EUR",months:new Set(["2026-06"]),stores:new Set(["Демо-магазин"])};
+  const products=[
+    ["Scalloped Trofast Decals, Pastel Set",4.8,2.10],
+    ["IKEA Trofast Box Stickers, Sage Green",3.9,1.80],
+    ["Playroom Storage Labels, Rainbow 12pk",7.5,3.20],
+    ["Montessori Toy Bin Labels, Terracotta",4.2,1.90],
+    ["Nursery Trofast Decals, Blush Pink",3.9,1.80],
+    ["Custom Name Trofast Sticker",6.0,2.40],
+  ];
+  const countries=[["Germany",.34],["United States",.28],["France",.20],["Netherlands",.18]];
+  let seed=42; const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;};
+  const pick=arr=>{let x=rnd(),a=0;for(const[v,w]of arr){a+=w;if(x<=a)return v;}return arr[0][0];};
+  STATE.files.push({name:"EtsySoldOrderItems_2026_6.csv (демо)",type:"items",rows:64,cols:[]});
+  STATE.files.push({name:"etsy_statement_2026_6.csv (демо)",type:"statement",rows:120,cols:[]});
+  let feeAcc=0;
+  for(let o=0;o<64;o++){
+    const lines=rnd()<0.25?2:1, country=pick(countries), oid="D"+(1000+o);
+    const oShip = rnd()<0.4?0:(2.5+rnd()*2), oDisc = rnd()<0.35?(0.5+rnd()*2):0;
+    for(let l=0;l<lines;l++){
+      const[p,price,]=products[Math.floor(rnd()*products.length)];
+      const qty=rnd()<0.2?2:1, rev=+(price*qty).toFixed(2);
+      STATE.items.push({store:"Демо-магазин",oid,item:p,sku:"",qty,rev,
+        ship:l===0?+oShip.toFixed(2):0, disc:l===0?+oDisc.toFixed(2):0, tax:+(rev*0.05).toFixed(2),
+        oval:rev, country, date:"2026-06-15"});
+      feeAcc += rev*0.105 + 0.20*qty;
+    }
+    feeAcc += oShip*0.105;
+  }
+  STATE.feesFromStatement=+feeAcc.toFixed(2);
+  afterLoad();
+}
+
+/* ---------- File handling ---------- */
+function handleFiles(list){
+  const files=[...list].filter(f=>/\.csv$/i.test(f.name));
+  if(!files.length){alert("Нужны файлы .csv из выгрузки Etsy.");return;}
+  let pending=files.length;
+  files.forEach(file=>{
+    const rd=new FileReader();
+    rd.onload=e=>{try{ingest(file.name,e.target.result);}catch(err){console.error(err);}
+      if(--pending===0)afterLoad();};
+    rd.readAsText(file);
+  });
+}
+function afterLoad(){
+  if(SET.cur==="EUR"&&STATE.currency&&/USD/i.test(STATE.currency))SET.cur="USD";
+  $("#dash").classList.remove("hidden");
+  render();
+  document.querySelector("#dash").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+/* ---------- Compute ---------- */
+function compute(){
+  const it=STATE.items;
+  const orders={};
+  it.forEach(r=>{(orders[r.oid]=orders[r.oid]||[]).push(r);});
+  const orderIds=Object.keys(orders);
+
+  let grossItems=0, units=0, shipCharged=0, discounts=0, tax=0, cogs=0;
+  const byCountry={}, byProduct={};
+  it.forEach(r=>{grossItems+=r.rev;units+=r.qty;
+    const c=PROD_COGS[r.item]!=null?PROD_COGS[r.item]:SET.cogs; cogs+=c*r.qty;
+    const bp=byProduct[r.item]=byProduct[r.item]||{qty:0,rev:0};bp.qty+=r.qty;bp.rev+=r.rev;});
+  orderIds.forEach(oid=>{const first=orders[oid][0];
+    shipCharged+=first.ship; discounts+=first.disc; tax+=first.tax;
+    const rev=orders[oid].reduce((a,r)=>a+r.rev,0);
+    const cn=first.country;const bc=byCountry[cn]=byCountry[cn]||{orders:0,rev:0};
+    bc.orders++; bc.rev+=rev+first.ship;});
+
+  const netRevenue=grossItems+shipCharged-discounts;
+  const nOrders=orderIds.length;
+  const etsyFees = SET.feeMode==="statement" && STATE.feesFromStatement!=null
+      ? STATE.feesFromStatement
+      : netRevenue*(SET.feePct/100)+units*SET.listing;
+  const shipCost=nOrders*SET.ship;
+  const grossProfit=netRevenue-etsyFees-cogs-shipCost;
+  const fixed=SET.fixed, labor=nOrders*SET.labor;
+  const netProfit=grossProfit-fixed-labor;
+
+  // country net profit (proportional allocation of fees/cogs/costs by revenue share)
+  const share=cn=>netRevenue>0?(byCountry[cn].rev)/(netRevenue||1):0;
+  Object.keys(byCountry).forEach(cn=>{const s=share(cn);
+    byCountry[cn].net=byCountry[cn].rev - (etsyFees+cogs+shipCost+fixed+labor)*s;});
+
+  return{grossItems,units,shipCharged,discounts,tax,netRevenue,nOrders,etsyFees,cogs,shipCost,
+    grossProfit,fixed,labor,netProfit,byCountry,byProduct};
+}
+
+/* ---------- Format ---------- */
+const CURMAP={EUR:"de-DE",USD:"en-US",GBP:"en-GB"};
+function money(v){const loc=CURMAP[SET.cur]||"de-DE";
+  return new Intl.NumberFormat(loc,{style:"currency",currency:SET.cur,maximumFractionDigits:2}).format(v||0);}
+function pct(v){return (v*100).toFixed(1).replace(".",",")+"%";}
+
+/* ---------- Render ---------- */
+function render(){
+  renderChips();
+  if(!STATE.items.length)return;
+  const m=compute();
+  const rev=m.netRevenue||1;
+
+  // KPIs
+  const npClass=m.netProfit>=0?"pos":"neg";
+  $("#kpis").innerHTML=`
+    <div class="kpi hero"><div class="lab">Чистая прибыль</div>
+      <div class="val ${npClass} num">${money(m.netProfit)}</div>
+      <div class="meta">маржа ${pct(m.netProfit/rev)} · ${m.nOrders} заказов</div></div>
+    <div class="kpi"><div class="lab">Чистая выручка</div>
+      <div class="val num">${money(m.netRevenue)}</div>
+      <div class="meta">${m.units} шт продано</div></div>
+    <div class="kpi"><div class="lab">Валовая прибыль</div>
+      <div class="val num">${money(m.grossProfit)}</div>
+      <div class="meta">маржа ${pct(m.grossProfit/rev)}</div></div>
+    <div class="kpi"><div class="lab">Средний чек</div>
+      <div class="val num">${money(m.netRevenue/(m.nOrders||1))}</div>
+      <div class="meta">на заказ</div></div>`;
+
+  // P&L
+  const feeSrc = SET.feeMode==="statement"&&STATE.feesFromStatement!=null?"из Statement":"оценка "+SET.feePct+"%";
+  const line=(name,val,{sub,total,neg,muted}={})=>{
+    const cls=[sub?"sub":"",total?"total":""].join(" ");
+    const amtCls=neg?"amt neg-amt num":"amt num";
+    const nm=muted?'name muted-name':'name';
+    const p=(total||name.startsWith("="))?"":`<div class="pct num">${pct(Math.abs(val)/rev)}</div>`;
+    return `<div class="row ${cls}"><div class="${nm}">${name}</div>
+      <div class="${amtCls}">${neg?"−"+money(Math.abs(val)):money(val)}</div>${p||'<div class="pct"></div>'}</div>`;
+  };
+  $("#pnl").innerHTML=
+    line("Выручка с товаров", m.grossItems)+
+    line("Доставка с клиента", m.shipCharged)+
+    line("Скидки / купоны", m.discounts, {neg:true})+
+    line("= Чистая выручка", m.netRevenue, {sub:true})+
+    line(`Комиссии Etsy (${feeSrc})`, m.etsyFees, {neg:true})+
+    line("Себестоимость (COGS)", m.cogs, {neg:true})+
+    line("Доставка (реальная)", m.shipCost, {neg:true})+
+    line("= Валовая прибыль", m.grossProfit, {sub:true})+
+    line("Постоянные расходы", m.fixed, {neg:true})+
+    line("Оплата труда", m.labor, {neg:true})+
+    line("= Чистая прибыль", m.netProfit, {total:true});
+  $("#pnlNote").textContent=`Налог с продаж (${money(m.tax)}) — транзитный, Etsy его перечисляет, в прибыль не входит.`;
+  $("#pnlCtx").textContent=[...STATE.stores].join(" · ")+(STATE.months.size?" · "+[...STATE.months].sort().join(", "):"");
+
+  // Country
+  const cs=Object.entries(m.byCountry).sort((a,b)=>b[1].rev-a[1].rev);
+  const maxRev=Math.max(...cs.map(c=>c[1].rev),1);
+  $("#byCountry").innerHTML=cs.map(([cn,d])=>{
+    const npc=d.net>=0?"var(--pos)":"var(--neg)";
+    return `<div class="barrow">
+      <div class="bl"><span class="flag"></span>${cn}</div>
+      <div class="track"><div class="fill" style="width:${(d.rev/maxRev*100).toFixed(1)}%"></div></div>
+      <div class="bv num">${money(d.rev)} · <span style="color:${npc}">${money(d.net)}</span></div>
+    </div>`;}).join("")||'<div class="empty">Нет данных по странам.</div>';
+
+  // Product table
+  const ps=Object.entries(m.byProduct).sort((a,b)=>b[1].rev-a[1].rev);
+  $("#byProduct").innerHTML=
+    `<thead><tr><th>Товар</th><th>Шт</th><th>Выручка</th><th>Себест./шт</th><th>Прибыль*</th></tr></thead><tbody>`+
+    ps.map(([name,d])=>{
+      const c=PROD_COGS[name]!=null?PROD_COGS[name]:SET.cogs;
+      const feeRate=SET.feeMode==="statement"&&m.netRevenue?m.etsyFees/m.netRevenue:SET.feePct/100;
+      const prof=d.rev*(1-feeRate)-c*d.qty;
+      const pc=prof>=0?"var(--pos)":"var(--neg)";
+      return `<tr><td>${name}</td><td class="num">${d.qty}</td><td class="num">${money(d.rev)}</td>
+        <td><input class="cogs-in num" type="number" step="0.01" value="${(+c).toFixed(2)}" data-p="${encodeURIComponent(name)}"></td>
+        <td class="num" style="color:${pc}">${money(prof)}</td></tr>`;
+    }).join("")+`</tbody>`;
+  $$("#byProduct .cogs-in").forEach(inp=>inp.oninput=e=>{
+    PROD_COGS[decodeURIComponent(e.target.dataset.p)]=parseFloat(e.target.value)||0;save();render();});
+}
+
+function renderChips(){
+  const box=$("#chips");
+  if(!STATE.files.length){box.innerHTML="";return;}
+  const label={items:"Товары",orders:"Заказы",statement:"Комиссии",unknown:"Не распознан"};
+  let html=STATE.files.map(f=>{
+    const warn=f.type==="unknown";
+    return `<span class="chip ${warn?'warn':''}"><span class="dot"></span>${f.name.slice(0,32)} · ${label[f.type]||f.type} · ${f.rows} строк</span>`;
+  }).join("");
+  if(SET.feeMode==="statement"&&STATE.feesFromStatement==null)
+    html+=`<span class="chip warn"><span class="dot"></span>Файл Statement не загружен — комиссии считаются оценкой</span>`;
+  box.innerHTML=html;
+}
+
+/* ---------- Wire up ---------- */
+const drop=$("#drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+drop.addEventListener("drop",e=>handleFiles(e.dataTransfer.files));
+$("#pickBtn").onclick=()=>$("#fileInput").click();
+$("#fileInput").onchange=e=>handleFiles(e.target.files);
+$("#demoBtn").onclick=loadDemo;
+bindSettings();
+</script>
