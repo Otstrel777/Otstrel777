@@ -361,12 +361,14 @@ function ingest(name,text){
     data.forEach(r=>{
       const qty=C.qty?Math.max(1,Math.round(num(r[C.qty]))):1;
       const price=C.price?num(r[C.price]):0;
-      const itotal=C.itotal?num(r[C.itotal]):(price*qty);
+      const oval=C.oval?num(r[C.oval]):0;
+      // Order Items CSV → price/itotal per line; Orders CSV → one row per order, use Order Value
+      const itotal=C.itotal?num(r[C.itotal]):(price*qty||oval);
       STATE.items.push({
         store, oid:C.oid?r[C.oid]:name+"-"+STATE.items.length,
-        item:(C.item?r[C.item]:"(без названия)").slice(0,80)||"(без названия)",
+        item:(C.item?r[C.item]:"Заказ").slice(0,80)||"Заказ",
         sku:C.sku?r[C.sku]:"", qty,
-        rev: itotal||price*qty,
+        rev: itotal||price*qty||oval,
         ship:C.ship?num(r[C.ship]):0,
         disc:C.disc?num(r[C.disc]):0,
         tax:C.tax?num(r[C.tax]):0,
