@@ -75,7 +75,7 @@ CONFIG = {
     "fx_rate": 0.92,            # USD -> EUR (update to the current rate)
     "price_markup": 0.0,        # e.g. 0.15 to add 15% for eBay fees
     "price_surcharge": 0.0,     # flat amount added after markup
-    "price_round_to": 0.99,     # round up to nearest .99; 0 disables
+    "price_round_to": 0,        # keep exact price; set 0.99 for .99 pricing
 
     # Handling time (business days until you dispatch). Made-to-order needs a
     # realistic number so you don't get late-shipping defects.
@@ -170,13 +170,18 @@ def parse_etsy_csv(path):
 # Transform helpers
 # ============================================================
 
-def convert_price(raw_price, cfg, fx_rate):
-    """Etsy price string -> eBay EUR price string."""
+def convert_price(raw_price, cfg, fx_rate, currency=""):
+    """Etsy price string -> eBay EUR price string.
+
+    If the Etsy row is already priced in EUR, the FX rate is ignored (no
+    conversion) so EUR shops don't get their prices scaled by mistake.
+    """
     try:
         value = float(str(raw_price).replace(",", ".").strip() or 0)
     except ValueError:
         return ""
-    value = value * fx_rate * (1 + cfg["price_markup"]) + cfg["price_surcharge"]
+    rate = 1.0 if (currency or "").strip().upper() == "EUR" else fx_rate
+    value = value * rate * (1 + cfg["price_markup"]) + cfg["price_surcharge"]
     round_to = cfg.get("price_round_to") or 0
     if round_to:
         # round UP to the next .99 (or whatever the fractional target is)
@@ -252,7 +257,7 @@ def build_rows(etsy_rows, cfg, fx_rate, action):
                 f"Row {idx}: title shortened to 80 chars -> \"{title}\""
             )
         qty = cfg["quantity"] if cfg["quantity"] is not None else (r.quantity or "1")
-        price = convert_price(r.price, cfg, fx_rate)
+        price = convert_price(r.price, cfg, fx_rate, r.currency)
         if not price:
             warnings.append(f"Row {idx}: could not parse price '{r.price}'")
         if not r.images:
