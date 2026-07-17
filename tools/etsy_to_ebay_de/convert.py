@@ -116,6 +116,13 @@ CONFIG = {
         "Extra Short Strip": "22.90",
         "Extra Long Strip": "23.90",
     },
+    # Variation options to leave OUT of eBay.de listings. We sell to Europe,
+    # so the US/CA/AU sizes are dropped. Any Etsy option not in variation_prices
+    # (accidental/custom values) is dropped automatically too.
+    "variation_exclude": [
+        "With Ladder US/CA/AU",
+        "No Ladder US/CA/AU",
+    ],
 }
 
 # eBay hard limit on title length.
@@ -322,15 +329,17 @@ def build_rows(etsy_rows, cfg, fx_rate, action, variations=False):
             warnings.append(f"Row {idx}: Category is empty (set CONFIG['category_id'])")
 
         price_map = cfg["variation_prices"]
-        use_variation = (
-            variations
-            and r.variation_values
-            and all(v in price_map for v in r.variation_values)
-        )
+        exclude = set(cfg.get("variation_exclude") or [])
+        # Keep only options we have a price for and that aren't excluded
+        # (US/CA/AU, accidental/custom values like "Dezaré", etc.).
+        values = [v for v in r.variation_values if v in price_map and v not in exclude]
+        dropped = [v for v in r.variation_values if v not in values]
+        use_variation = variations and len(values) >= 2
 
         if use_variation:
+            if dropped:
+                warnings.append(f"Row {idx}: dropped variation option(s) {dropped}")
             # Parent row: no Relationship, no StartPrice/Quantity.
-            values = r.variation_values
             details = cfg["variation_ebay_name"] + "=" + ";".join(values)
             parent = {action_col: action, **_shared_fields(r, cfg, title)}
             parent["Relationship"] = ""
@@ -350,10 +359,9 @@ def build_rows(etsy_rows, cfg, fx_rate, action, variations=False):
                 out.append(child)
         else:
             if variations and r.variation_values:
-                unknown = [v for v in r.variation_values if v not in price_map]
                 warnings.append(
-                    f"Row {idx}: listed as single item (no price for "
-                    f"{unknown}); add them to CONFIG['variation_prices']"
+                    f"Row {idx}: listed as single item (fewer than 2 known "
+                    f"priced options; got {values or 'none'})"
                 )
             qty = cfg["quantity"] if cfg["quantity"] is not None else (r.quantity or "1")
             price = convert_price(r.price, cfg, fx_rate, r.currency)

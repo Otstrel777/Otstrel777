@@ -63,8 +63,13 @@ but **not** the price of each option. Put those prices in
 `CONFIG['variation_prices']` (value → EUR). With `--variations`, each listing
 whose variation values are all found in that map becomes a proper eBay
 variation listing (a parent row plus one child row per option, each with its
-own price and quantity). Any listing with an option missing from the map is
-listed as a single item instead and a warning tells you which option to add.
+own price and quantity). A listing that ends up with fewer than 2 known options
+is listed as a single item instead, and a warning tells you why.
+
+Options you don't want on eBay.de (e.g. the US/CA/AU sizes when you only ship
+within Europe) go in `CONFIG['variation_exclude']` and are left out. Any Etsy
+option that isn't in `variation_prices` at all (accidental/custom values) is
+dropped automatically, and each drop is reported as a warning.
 
 ```bash
 python convert.py etsy_listings.csv --filter "kura bed" --limit 5 \
