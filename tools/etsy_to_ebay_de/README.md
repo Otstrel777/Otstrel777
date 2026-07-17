@@ -45,6 +45,16 @@ python convert.py etsy_listings.csv -o ebay_de_upload.csv --verify
 # real run
 python convert.py etsy_listings.csv -o ebay_de_upload.csv --rate 0.92
 ```
+
+Roll out in small batches instead of all at once:
+```bash
+# only "KURA bed" listings, first 5, with a category id, validate-only
+python convert.py etsy_listings.csv --filter "kura bed" --limit 5 \
+    --category 108426 --verify -o kura_test_5.csv
+```
+- `--filter TEXT`   only listings whose title contains TEXT (case-insensitive)
+- `--limit N`       only the first N matching listings
+- `--category ID`   eBay.de category id for this batch (overrides CONFIG)
 Read the warnings it prints — empty category, unparseable price, missing
 images and shortened titles are all reported per row.
 

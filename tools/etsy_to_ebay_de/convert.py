@@ -139,8 +139,13 @@ def _pick(row, *names):
     return ""
 
 
-def parse_etsy_csv(path):
-    """Read Etsy's 'Currently for sale listings' CSV into EtsyRow objects."""
+def parse_etsy_csv(path, title_filter="", limit=0):
+    """Read Etsy's 'Currently for sale listings' CSV into EtsyRow objects.
+
+    title_filter: keep only listings whose TITLE contains this text
+                  (case-insensitive). Empty = keep all.
+    limit:        keep at most this many (after filtering). 0 = no limit.
+    """
     rows = []
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -161,8 +166,13 @@ def parse_etsy_csv(path):
                 images=images,
                 sku=_pick(raw, "SKU", "Sku"),
             )
-            if row.title:
-                rows.append(row)
+            if not row.title:
+                continue
+            if title_filter and title_filter.lower() not in row.title.lower():
+                continue
+            rows.append(row)
+            if limit and len(rows) >= limit:
+                break
     return rows
 
 
@@ -314,14 +324,22 @@ def main():
                     help="USD->EUR FX rate (overrides CONFIG['fx_rate'])")
     ap.add_argument("--verify", action="store_true",
                     help="use Action=VerifyAdd (eBay validates only, no live listings)")
+    ap.add_argument("--filter", default="", dest="title_filter",
+                    help="only listings whose title contains this text (case-insensitive)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="only the first N matching listings (0 = all)")
+    ap.add_argument("--category", default=None,
+                    help="eBay.de category id (overrides CONFIG['category_id'])")
     args = ap.parse_args()
 
     cfg = dict(CONFIG)
+    if args.category is not None:
+        cfg["category_id"] = args.category
     fx_rate = args.rate if args.rate is not None else cfg["fx_rate"]
     action = "VerifyAdd" if args.verify else "Add"
 
     try:
-        etsy_rows = parse_etsy_csv(args.input)
+        etsy_rows = parse_etsy_csv(args.input, args.title_filter, args.limit)
     except FileNotFoundError:
         print(f"Input file not found: {args.input}", file=sys.stderr)
         sys.exit(1)
