@@ -99,6 +99,23 @@ CONFIG = {
     # Convert Etsy line breaks in the description to <br> so it reads well on
     # eBay (eBay descriptions accept HTML).
     "description_as_html": True,
+
+    # ----- Variations (multi-variation listings) -----
+    # Enabled with --variations. Etsy's export does NOT contain per-option
+    # prices, so you must supply them here: variation value -> EUR price.
+    # A listing is only expanded into a variation listing if EVERY one of its
+    # Etsy variation values is found in this map; otherwise it is listed as a
+    # single item at its base price and a warning is emitted.
+    "variation_ebay_name": "Size",   # variation dimension name shown on eBay
+    "variation_quantity": 10,        # quantity per variation option
+    "variation_prices": {
+        "With Ladder EU/UK": "49.90",
+        "No Ladder EU/UK": "49.90",
+        "With Ladder US/CA/AU": "49.90",
+        "No Ladder US/CA/AU": "49.90",
+        "Extra Short Strip": "22.90",
+        "Extra Long Strip": "23.90",
+    },
 }
 
 # eBay hard limit on title length.
@@ -120,10 +137,14 @@ class EtsyRow:
     materials: str = ""
     images: list = None
     sku: str = ""
+    variation_name: str = ""      # e.g. "Size"
+    variation_values: list = None  # e.g. ["With Ladder EU/UK", ...]
 
     def __post_init__(self):
         if self.images is None:
             self.images = []
+        if self.variation_values is None:
+            self.variation_values = []
 
 
 # ============================================================
@@ -155,6 +176,9 @@ def parse_etsy_csv(path, title_filter="", limit=0):
                 url = _pick(raw, f"IMAGE{i}", f"IMAGE {i}", f"image{i}")
                 if url:
                     images.append(url)
+            var_name = _pick(raw, "VARIATION 1 NAME", "VARIATION_1_NAME")
+            var_values_raw = _pick(raw, "VARIATION 1 VALUES", "VARIATION_1_VALUES")
+            var_values = [v.strip() for v in var_values_raw.split(",") if v.strip()]
             row = EtsyRow(
                 title=_pick(raw, "TITLE", "Title"),
                 description=_pick(raw, "DESCRIPTION", "Description"),
@@ -165,6 +189,8 @@ def parse_etsy_csv(path, title_filter="", limit=0):
                 materials=_pick(raw, "MATERIALS", "Materials"),
                 images=images,
                 sku=_pick(raw, "SKU", "Sku"),
+                variation_name=var_name,
+                variation_values=var_values,
             )
             if not row.title:
                 continue
@@ -236,6 +262,8 @@ def ebay_header(cfg):
         "CustomLabel",
         "Category",
         "Title",
+        "Relationship",
+        "RelationshipDetails",
         "Description",
         "ConditionID",
         "PicURL",
@@ -256,48 +284,87 @@ def ebay_header(cfg):
     ], action_col
 
 
-def build_rows(etsy_rows, cfg, fx_rate, action):
+def _shared_fields(r, cfg, title):
+    """Listing-level fields shared by a single item or a variation parent."""
+    return {
+        "CustomLabel": r.sku,
+        "Category": cfg["category_id"],
+        "Title": title,
+        "Description": clean_description(r.description, cfg["description_as_html"]),
+        "ConditionID": cfg["condition_id"],
+        "PicURL": "|".join(r.images),
+        "Format": cfg["format"],
+        "Duration": cfg["duration"],
+        "Location": cfg["location"],
+        "ShippingType": cfg["shipping_type"],
+        "ShippingService-1:Option": cfg["shipping_service"],
+        "ShippingService-1:Cost": cfg["shipping_cost"],
+        "DispatchTimeMax": cfg["dispatch_time_max"],
+        "ReturnsAcceptedOption": cfg["returns_accepted"],
+        "ReturnsWithinOption": cfg["returns_within"],
+        "RefundOption": cfg["refund_option"],
+        "ShippingCostPaidByOption": cfg["return_shipping_paid_by"],
+        "C:Marke": cfg["brand"],
+    }
+
+
+def build_rows(etsy_rows, cfg, fx_rate, action, variations=False):
     header, action_col = ebay_header(cfg)
     out = []
     warnings = []
     for idx, r in enumerate(etsy_rows, 1):
         title = clean_title(r.title)
         if len(r.title) > EBAY_TITLE_MAX:
-            warnings.append(
-                f"Row {idx}: title shortened to 80 chars -> \"{title}\""
-            )
-        qty = cfg["quantity"] if cfg["quantity"] is not None else (r.quantity or "1")
-        price = convert_price(r.price, cfg, fx_rate, r.currency)
-        if not price:
-            warnings.append(f"Row {idx}: could not parse price '{r.price}'")
+            warnings.append(f"Row {idx}: title shortened to 80 chars -> \"{title}\"")
         if not r.images:
             warnings.append(f"Row {idx}: no image URLs found")
         if not cfg["category_id"]:
             warnings.append(f"Row {idx}: Category is empty (set CONFIG['category_id'])")
 
-        out.append({
-            action_col: action,
-            "CustomLabel": r.sku,
-            "Category": cfg["category_id"],
-            "Title": title,
-            "Description": clean_description(r.description, cfg["description_as_html"]),
-            "ConditionID": cfg["condition_id"],
-            "PicURL": "|".join(r.images),
-            "Quantity": qty,
-            "Format": cfg["format"],
-            "StartPrice": price,
-            "Duration": cfg["duration"],
-            "Location": cfg["location"],
-            "ShippingType": cfg["shipping_type"],
-            "ShippingService-1:Option": cfg["shipping_service"],
-            "ShippingService-1:Cost": cfg["shipping_cost"],
-            "DispatchTimeMax": cfg["dispatch_time_max"],
-            "ReturnsAcceptedOption": cfg["returns_accepted"],
-            "ReturnsWithinOption": cfg["returns_within"],
-            "RefundOption": cfg["refund_option"],
-            "ShippingCostPaidByOption": cfg["return_shipping_paid_by"],
-            "C:Marke": cfg["brand"],
-        })
+        price_map = cfg["variation_prices"]
+        use_variation = (
+            variations
+            and r.variation_values
+            and all(v in price_map for v in r.variation_values)
+        )
+
+        if use_variation:
+            # Parent row: no Relationship, no StartPrice/Quantity.
+            values = r.variation_values
+            details = cfg["variation_ebay_name"] + "=" + ";".join(values)
+            parent = {action_col: action, **_shared_fields(r, cfg, title)}
+            parent["Relationship"] = ""
+            parent["RelationshipDetails"] = details
+            parent["StartPrice"] = ""
+            parent["Quantity"] = ""
+            out.append(parent)
+            # Child rows: one per variation value, each with its own price.
+            for v in values:
+                child = {c: "" for c in header}
+                child[action_col] = action
+                child["Relationship"] = "Variation"
+                child["RelationshipDetails"] = f"{cfg['variation_ebay_name']}={v}"
+                child["StartPrice"] = price_map[v]
+                child["Quantity"] = cfg["variation_quantity"]
+
+                out.append(child)
+        else:
+            if variations and r.variation_values:
+                unknown = [v for v in r.variation_values if v not in price_map]
+                warnings.append(
+                    f"Row {idx}: listed as single item (no price for "
+                    f"{unknown}); add them to CONFIG['variation_prices']"
+                )
+            qty = cfg["quantity"] if cfg["quantity"] is not None else (r.quantity or "1")
+            price = convert_price(r.price, cfg, fx_rate, r.currency)
+            if not price:
+                warnings.append(f"Row {idx}: could not parse price '{r.price}'")
+            single = {action_col: action, **_shared_fields(r, cfg, title)}
+            single["Relationship"] = ""
+            single["RelationshipDetails"] = ""
+            single["StartPrice"] = price
+            single["Quantity"] = qty
+            out.append(single)
     return header, out, warnings
 
 
@@ -330,6 +397,9 @@ def main():
                     help="only the first N matching listings (0 = all)")
     ap.add_argument("--category", default=None,
                     help="eBay.de category id (overrides CONFIG['category_id'])")
+    ap.add_argument("--variations", action="store_true",
+                    help="expand Etsy variations into eBay variation listings "
+                         "(uses CONFIG['variation_prices'])")
     args = ap.parse_args()
 
     cfg = dict(CONFIG)
@@ -349,10 +419,12 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    header, rows, warnings = build_rows(etsy_rows, cfg, fx_rate, action)
+    header, rows, warnings = build_rows(etsy_rows, cfg, fx_rate, action,
+                                        variations=args.variations)
     write_csv(args.output, header, rows)
 
-    print(f"Converted {len(rows)} listing(s) -> {args.output}")
+    print(f"Converted {len(etsy_rows)} listing(s) -> {len(rows)} row(s) "
+          f"-> {args.output}")
     print(f"Action: {action} | FX rate: {fx_rate} | Category: "
           f"{cfg['category_id'] or '(empty - fill the Category column!)'}")
     if warnings:
