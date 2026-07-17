@@ -96,6 +96,11 @@ CONFIG = {
     # Brand shown in item specifics. "Handmade" or your shop name work well.
     "brand": "Handmade",
 
+    # "Produktart" is a REQUIRED item specific in the Wandtattoo category
+    # (108426). If eBay rejects this value, list one item manually, copy the
+    # exact value eBay offers in the Produktart dropdown, and put it here.
+    "produktart": "Wandtattoo",
+
     # Convert Etsy line breaks in the description to <br> so it reads well on
     # eBay (eBay descriptions accept HTML).
     "description_as_html": True,
@@ -288,6 +293,7 @@ def ebay_header(cfg):
         "RefundOption",
         "ShippingCostPaidByOption",
         "C:Marke",
+        "C:Produktart",
     ], action_col
 
 
@@ -312,6 +318,7 @@ def _shared_fields(r, cfg, title):
         "RefundOption": cfg["refund_option"],
         "ShippingCostPaidByOption": cfg["return_shipping_paid_by"],
         "C:Marke": cfg["brand"],
+        "C:Produktart": cfg["produktart"],
     }
 
 
