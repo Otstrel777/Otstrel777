@@ -34,6 +34,10 @@ COL_LAND = 10
 COL_RECHNUNG = 12
 COL_SATZ = 15
 COL_STEUER = 16
+# Billbee legt die Rechnung erst beim Versand an, deshalb steht in Spalte 25
+# beides zugleich: Versanddatum und Rechnungsdatum. Nachweisbar daran, dass die
+# Rechnungsnummern streng mit dieser Spalte aufsteigen, mit dem Bestelldatum
+# aus Spalte 2 dagegen nicht. Spalte 3 ist das Zahlungsdatum.
 COL_VERSAND = 25
 COL_NETTO = 29
 
@@ -144,7 +148,8 @@ def stichtag(beleg, basis):
     """Das Datum, das den Meldezeitraum des Belegs bestimmt.
 
     Bei der Versand-Abgrenzung zaehlt der Beginn der Versendung (§ 3 Abs. 6
-    UStG). Gutschriften werden nicht versendet und tragen deshalb kein
+    UStG); weil Billbee die Rechnung beim Versand anlegt, ist das zugleich das
+    Rechnungsdatum. Gutschriften werden nicht versendet und tragen deshalb kein
     Versanddatum; fuer sie bleibt es beim Buchungsdatum.
     """
     gutschrift = beleg["bestellung"].endswith("-GS") or beleg["brutto"] < 0
