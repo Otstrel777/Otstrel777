@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+
+# Bestell- und Steuerdaten enthalten Kundennamen und Anschriften
+# und gehören nicht ins Repository.
+*.csv
+*.xlsx
