@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Sales exports and generated reports — never commit business data
+*.csv
+*.xlsx
