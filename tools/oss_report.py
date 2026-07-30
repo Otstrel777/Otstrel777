@@ -34,6 +34,7 @@ COL_LAND = 10
 COL_RECHNUNG = 12
 COL_SATZ = 15
 COL_STEUER = 16
+COL_VERSAND = 25
 COL_NETTO = 29
 
 DEUTSCHER_SATZ = Decimal("19")
@@ -85,7 +86,10 @@ def betrag(text):
 
 
 def datum(text):
-    return datetime.datetime.strptime(text.strip(), "%d.%m.%Y").date()
+    text = text.strip()
+    if not text:
+        return None
+    return datetime.datetime.strptime(text, "%d.%m.%Y").date()
 
 
 def eur(wert):
@@ -124,6 +128,7 @@ def beleg_aufbereiten(nr, zeile):
         "rechnung": zeile[COL_RECHNUNG] or "—",
         "bestellung": zeile[COL_BESTELLUNG].strip(),
         "datum": datum(zeile[COL_DATUM]),
+        "versand": datum(zeile[COL_VERSAND]),
         "land": zeile[COL_LAND].strip().upper(),
         "plz": zeile[COL_PLZ].strip(),
         "ort": html.unescape(zeile[COL_ORT]),
@@ -135,14 +140,33 @@ def beleg_aufbereiten(nr, zeile):
     }
 
 
-def klassifizieren(belege, start, ende):
+def stichtag(beleg, basis):
+    """Das Datum, das den Meldezeitraum des Belegs bestimmt.
+
+    Bei der Versand-Abgrenzung zaehlt der Beginn der Versendung (§ 3 Abs. 6
+    UStG). Gutschriften werden nicht versendet und tragen deshalb kein
+    Versanddatum; fuer sie bleibt es beim Buchungsdatum.
+    """
+    gutschrift = beleg["bestellung"].endswith("-GS") or beleg["brutto"] < 0
+    if basis == "versand" and not gutschrift:
+        return beleg["versand"]
+    return beleg["datum"]
+
+
+def klassifizieren(belege, start, ende, basis="rechnung"):
     """Verteilt die Belege auf die Meldekategorien."""
     ergebnis = {
         "fernverkauf": [], "berichtigung": [], "deutsche_ust": [],
-        "ausfuhr": [], "ausserhalb": [],
+        "ausfuhr": [], "ausserhalb": [], "nicht_versendet": [],
     }
     for b in belege:
-        if not start <= b["datum"] <= ende:
+        tag = stichtag(b, basis)
+        if tag is None:
+            # Noch nicht versendet: es liegt keine Lieferung vor, die zu
+            # melden waere. Diese Belege tragen auch keine Rechnungsnummer.
+            ergebnis["nicht_versendet"].append(b)
+            continue
+        if not start <= tag <= ende:
             ergebnis["ausserhalb"].append(b)
             continue
         grund = gebiet_ausserhalb_eu(b["land"], b["plz"])
@@ -182,6 +206,11 @@ def pruefen(belege):
             hinweise.append(
                 f"Rg. {b['rechnung']}: {b['land']} mit {prozent(b['satz'])} "
                 f"statt Regelsatz {prozent(Decimal(regel))}")
+        if b["rechnung"] == "—" and b["versand"] is None:
+            hinweise.append(
+                f"Bestellung {b['bestellung']} ({b['land']}, {eur(b['brutto'])}, "
+                f"{b['datum'].strftime('%d.%m.%Y')}): weder Rechnungsnummer noch "
+                "Versanddatum – vor der Meldung klären, ob storniert oder offen")
     return hinweise
 
 
@@ -198,11 +227,14 @@ def summieren(belege):
     return dict(sorted(summen.items()))
 
 
-def bericht_ausgeben(summen, kategorien, quartal, jahr, start, ende, hinweise):
+def bericht_ausgeben(summen, kategorien, quartal, jahr, start, ende, hinweise,
+                     basis="rechnung"):
     breite = 86
     print("=" * breite)
     print(f"OSS-MELDUNG · {quartal}. QUARTAL {jahr}")
     print(f"Zeitraum {start.strftime('%d.%m.%Y')} – {ende.strftime('%d.%m.%Y')} · Währung EUR")
+    print(f"Abgrenzung nach "
+          + ("Versanddatum (§ 3 Abs. 6 UStG)" if basis == "versand" else "Rechnungsdatum"))
     print("=" * breite)
 
     print(f"\n1) MELDEDATEN FÜR ELSTER – innergemeinschaftliche Fernverkäufe (B2C)\n")
@@ -256,6 +288,7 @@ def bericht_ausgeben(summen, kategorien, quartal, jahr, start, ende, hinweise):
         ("Korrektur deutsche USt (Kz 81)", kategorien["deutsche_ust"]),
         ("Steuerfreie Ausfuhr (Kz 43)", kategorien["ausfuhr"]),
         ("Außerhalb des Meldezeitraums", kategorien["ausserhalb"]),
+        ("Nicht versendet, keine Lieferung", kategorien["nicht_versendet"]),
     ]
     gesamt_netto = gesamt_steuer = Decimal(0)
     gesamt_anzahl = 0
@@ -383,6 +416,9 @@ def main():
     p.add_argument("csv", help="Etsy-Bestellexport (CSV, semikolongetrennt, CP1252)")
     p.add_argument("-q", "--quartal", type=int, required=True, choices=(1, 2, 3, 4))
     p.add_argument("-j", "--jahr", type=int, required=True)
+    p.add_argument("--basis", choices=("rechnung", "versand"), default="rechnung",
+                   help="Datum, das den Meldezeitraum bestimmt: Rechnungsdatum "
+                        "(Vorgabe) oder Versanddatum (§ 3 Abs. 6 UStG)")
     p.add_argument("--xlsx", help="Zusätzlich eine Excel-Mappe schreiben")
     args = p.parse_args()
 
@@ -391,10 +427,19 @@ def main():
     if not belege:
         sys.exit("Keine auswertbaren Belege in der Datei gefunden.")
 
-    kategorien = klassifizieren(belege, start, ende)
+    kategorien = klassifizieren(belege, start, ende, args.basis)
     summen = summieren(kategorien["fernverkauf"])
-    hinweise = pruefen([b for b in belege if start <= b["datum"] <= ende])
-    bericht_ausgeben(summen, kategorien, args.quartal, args.jahr, start, ende, hinweise)
+    im_zeitraum = [b for b in belege
+                   if (t := stichtag(b, args.basis)) and start <= t <= ende]
+    hinweise = pruefen(im_zeitraum)
+    if args.basis == "versand":
+        hinweise.append(
+            "Abgrenzung nach Versanddatum: Bestellungen aus dem Vorquartal, die erst "
+            f"im {args.quartal}. Quartal versendet wurden, gehören hier hinein. Prüfen, "
+            "ob der Export sie enthält – er beginnt am "
+            f"{min(b['datum'] for b in belege).strftime('%d.%m.%Y')}.")
+    bericht_ausgeben(summen, kategorien, args.quartal, args.jahr, start, ende, hinweise,
+                     args.basis)
 
     if args.xlsx:
         xlsx_schreiben(args.xlsx, summen, kategorien, args.quartal, args.jahr, start, ende)
