@@ -219,7 +219,7 @@ def note(ws, row, text):
 # Workbook
 # ============================================================
 
-def build_workbook(orders, year, quarter, home, out_path):
+def build_workbook(orders, year, quarter, home, out_path, restricted=False):
     months = QUARTER_MONTHS[quarter]
     agg = orders.groupby("land").agg(brutto=("brutto", "sum"), n=("Order ID", "size")).round(2)
 
@@ -248,12 +248,13 @@ def build_workbook(orders, year, quarter, home, out_path):
     ws = wb.active
     ws.title = f"OSS {quarter} {year}"
     period = f"{MONTH_NAMES[months[0]]}–{MONTH_NAMES[months[2]]}"
-    sheet_title(
-        ws,
-        f"OSS-Meldung — {quarter[1]}. Quartal {year} ({period})",
-        "Innergemeinschaftliche Fernverkäufe an Privatkunden (B2C) — EU-Regelung, "
-        "§ 18j UStG. Alle Beträge in EUR.",
-    )
+    span = f"{orders['sale'].min():%d.%m.%Y} – {orders['sale'].max():%d.%m.%Y}"
+    subtitle = ("Innergemeinschaftliche Fernverkäufe an Privatkunden (B2C) — EU-Regelung, "
+                "§ 18j UStG. Alle Beträge in EUR.")
+    if restricted:
+        subtitle += (f"  ACHTUNG: eingeschränkter Zeitraum — nur Verkäufe vom {span}; "
+                     "frühere Umsätze des Quartals sind hier NICHT enthalten.")
+    sheet_title(ws, f"OSS-Meldung — {quarter[1]}. Quartal {year} ({period})", subtitle)
     for i, h in enumerate(
         ["Verbrauchsland (Mitgliedstaat)", "Code", "Bestellungen", "Bruttoumsatz (inkl. USt)",
          "Steuersatz", "Bemessungsgrundlage (netto)", "Umsatzsteuer"], 1):
@@ -450,7 +451,11 @@ def build_workbook(orders, year, quarter, home, out_path):
     notes = [
         ("Datengrundlage",
          f"Etsy-Exporte 'Sold Order Items' für {quarter} {year}: {len(orders)} Bestellungen, "
-         f"Gesamtbrutto {total_gross:,.2f} €. Alle Beträge in EUR."),
+         f"Gesamtbrutto {total_gross:,.2f} €. Alle Beträge in EUR."
+         + (f" Eingeschränkter Zeitraum: nur Verkäufe vom "
+            f"{orders['sale'].min():%d.%m.%Y} bis {orders['sale'].max():%d.%m.%Y} — frühere "
+            "Umsätze des Quartals wurden bewusst ausgeklammert, weil sie bereits in einer "
+            "früheren Erklärung enthalten waren." if restricted else "")),
         ("Berechnung des Bruttoumsatzes",
          "Je Bestellung: Item Total (Artikelpreis × Menge) + Order Shipping − Discount Amount "
          "− Shipping Discount. Versandkosten und Rabatte stehen im Etsy-Export nur in der "
@@ -514,6 +519,11 @@ def main(argv=None):
     ap.add_argument("-o", "--output", help="output .xlsx (default: OSS_<quarter>_<year>.xlsx)")
     ap.add_argument("--home", default="Germany",
                     help="seller's home country as spelled by Etsy (default: Germany)")
+    ap.add_argument("--since", metavar="YYYY-MM-DD",
+                    help="only orders sold on or after this date — use when earlier orders "
+                         "of the quarter were already declared in a previous return")
+    ap.add_argument("--until", metavar="YYYY-MM-DD",
+                    help="only orders sold on or before this date")
     args = ap.parse_args(argv)
 
     paths = sorted({p for pat in args.csv for p in (glob.glob(pat) or [pat])})
@@ -526,11 +536,22 @@ def main(argv=None):
         print(f"Warning: {len(outside)} order(s) fall outside {args.quarter} {args.year} "
               f"and are excluded.", file=sys.stderr)
         orders = orders.drop(outside.index)
+    if args.since:
+        cut = pd.Timestamp(args.since)
+        dropped = (orders["sale"] < cut).sum()
+        orders = orders[orders["sale"] >= cut]
+        print(f"--since {args.since}: {dropped} earlier order(s) excluded.", file=sys.stderr)
+    if args.until:
+        cut = pd.Timestamp(args.until)
+        dropped = (orders["sale"] > cut).sum()
+        orders = orders[orders["sale"] <= cut]
+        print(f"--until {args.until}: {dropped} later order(s) excluded.", file=sys.stderr)
     if orders.empty:
         raise SystemExit(f"No orders in {args.quarter} {args.year}.")
 
     oss, third, home_gross, total = build_workbook(orders, args.year, args.quarter,
-                                                   args.home, out)
+                                                   args.home, out,
+                                                   restricted=bool(args.since or args.until))
 
     print(f"{out}  —  {len(orders)} orders, {total:,.2f} EUR gross")
     print(f"{'Country':<26}{'Gross':>12}{'Rate':>8}{'Net':>12}{'VAT':>12}")
