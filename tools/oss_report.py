@@ -47,6 +47,14 @@ DEUTSCHER_SATZ = Decimal("19")
 # gehoeren in die USt-Voranmeldung, nicht in die OSS-Meldung.
 INLAND = "DE"
 
+# Mitgliedstaaten der EU. Lieferungen in alle uebrigen Laender sind
+# Ausfuhrlieferungen und gehoeren nicht in die OSS-Meldung.
+EU_MITGLIEDSTAATEN = {
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "FI", "FR", "GR",
+    "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+    "SI", "SE", "ES",
+}
+
 # Regelsteuersaetze 2026 der EU-Mitgliedstaaten.
 REGELSATZ = {
     "AT": 20, "BE": 21, "BG": 20, "HR": 25, "CY": 19, "CZ": 21, "DK": 25,
@@ -184,7 +192,13 @@ def klassifizieren(belege, start, ende, basis="bestellung", inland=INLAND):
         if not start <= tag <= ende:
             ergebnis["ausserhalb"].append(b)
             continue
+        if b["rechnung"] == "—" and b["rechnungsdatum"] is None:
+            # Keine Rechnung und kein Versand: es liegt keine Lieferung vor.
+            ergebnis["nicht_versendet"].append(b)
+            continue
         grund = gebiet_ausserhalb_eu(b["land"], b["plz"])
+        if not grund and b["land"] not in EU_MITGLIEDSTAATEN:
+            grund = "Drittland"
         if grund:
             b["grund"] = grund
             ergebnis["ausfuhr"].append(b)
@@ -215,6 +229,9 @@ def pruefen(belege):
             hinweise.append(
                 f"Rg. {b['rechnung']}: Netto {eur(b['netto'])} + USt {eur(b['steuer'])} "
                 f"ergibt nicht das ausgewiesene Brutto {eur(b['brutto'])}")
+        if b["land"] not in EU_MITGLIEDSTAATEN:
+            # Ausfuhr: das Satzfeld traegt einen Vorgabewert, berechnet wurde nichts.
+            continue
         erwartet = (b["netto"] * b["satz"] / 100).quantize(Decimal("0.01"))
         if abs(erwartet - b["steuer"]) > Decimal("0.02"):
             hinweise.append(
