@@ -348,6 +348,33 @@ def bericht_ausgeben(summen, kategorien, quartal, jahr, start, ende, hinweise,
             print(f"   ! {h}")
 
 
+# Das BZSt fuehrt Griechenland als EL, nicht als GR.
+BZST_LAND = {"GR": "EL"}
+
+
+def bzst_csv_schreiben(pfad, summen):
+    """Schreibt die Datenliste fuer den CSV-Import im BZSt-Online-Portal.
+
+    Aufbau nach Importhilfe Version 2.0: Versionszeile, je Verbrauchsland eine
+    Zeile der Satzart 1, danach je Land und Steuersatz eine Zeile der Satzart 3
+    (Warenlieferungen vom Inland aus). Ohne Feldbezeichnungszeile, weil die nur
+    bei Dateien mit einer einzigen Satzart vorgesehen ist.
+
+    Pflicht laut Vorgabe: UTF-8, Punkt als Dezimaltrennzeichen, genau zwei
+    Nachkommastellen, keine Leerzeilen.
+    """
+    zeilen = ["#v2.0"]
+    for land in sorted({BZST_LAND.get(l, l) for l, _ in summen}):
+        zeilen.append(f"1,{land}")
+    for (land, satz), w in sorted(summen.items(),
+                                  key=lambda kv: (BZST_LAND.get(kv[0][0], kv[0][0]), kv[0][1])):
+        typ = "STANDARD" if satz == REGELSATZ.get(land) else "REDUCED"
+        zeilen.append(f"{3},{BZST_LAND.get(land, land)},{typ},"
+                      f"{satz:.2f},{w['netto']:.2f},{w['steuer']:.2f}")
+    with open(pfad, "w", encoding="utf-8", newline="") as fh:
+        fh.write("\r\n".join(zeilen) + "\r\n")
+
+
 def xlsx_schreiben(pfad, summen, kategorien, quartal, jahr, start, ende):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -462,6 +489,8 @@ def main():
                    help="Sitzland des Verkäufers; Lieferungen dorthin sind "
                         f"Inlandsumsätze und gehören nicht ins OSS (Vorgabe {INLAND})")
     p.add_argument("--xlsx", help="Zusätzlich eine Excel-Mappe schreiben")
+    p.add_argument("--bzst-csv", metavar="DATEI",
+                   help="Datenliste für den CSV-Import im BZSt-Online-Portal schreiben")
     args = p.parse_args()
 
     start, ende = quartalsgrenzen(args.quartal, args.jahr)
@@ -495,6 +524,10 @@ def main():
     if args.xlsx:
         xlsx_schreiben(args.xlsx, summen, kategorien, args.quartal, args.jahr, start, ende)
         print(f"\nExcel-Mappe geschrieben: {args.xlsx}")
+
+    if args.bzst_csv:
+        bzst_csv_schreiben(args.bzst_csv, summen)
+        print(f"BZSt-Importdatei geschrieben: {args.bzst_csv}")
 
 
 if __name__ == "__main__":
