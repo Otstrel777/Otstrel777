@@ -43,6 +43,10 @@ COL_NETTO = 29
 
 DEUTSCHER_SATZ = Decimal("19")
 
+# Sitzland des Verkaeufers. Lieferungen dorthin sind Inlandsumsaetze und
+# gehoeren in die USt-Voranmeldung, nicht in die OSS-Meldung.
+INLAND = "DE"
+
 # Regelsteuersaetze 2026 der EU-Mitgliedstaaten.
 REGELSATZ = {
     "AT": 20, "BE": 21, "BG": 20, "HR": 25, "CY": 19, "CZ": 21, "DK": 25,
@@ -164,11 +168,11 @@ def stichtag(beleg, basis):
     return beleg["datum"]
 
 
-def klassifizieren(belege, start, ende, basis="bestellung"):
+def klassifizieren(belege, start, ende, basis="bestellung", inland=INLAND):
     """Verteilt die Belege auf die Meldekategorien."""
     ergebnis = {
         "fernverkauf": [], "berichtigung": [], "deutsche_ust": [],
-        "ausfuhr": [], "ausserhalb": [], "nicht_versendet": [],
+        "ausfuhr": [], "ausserhalb": [], "nicht_versendet": [], "inland": [],
     }
     for b in belege:
         tag = stichtag(b, basis)
@@ -184,6 +188,10 @@ def klassifizieren(belege, start, ende, basis="bestellung"):
         if grund:
             b["grund"] = grund
             ergebnis["ausfuhr"].append(b)
+            continue
+        if b["land"] == inland:
+            # Inlandsumsatz: gehoert in die USt-Voranmeldung, nicht ins OSS.
+            ergebnis["inland"].append(b)
             continue
         if b["bestellung"].endswith("-GS") or b["brutto"] < 0:
             # Der Steuersatz verraet, ob der Ursprungsumsatz im Bestimmungsland
@@ -301,6 +309,7 @@ def bericht_ausgeben(summen, kategorien, quartal, jahr, start, ende, hinweise,
         ("Steuerfreie Ausfuhr (Kz 43)", kategorien["ausfuhr"]),
         ("Außerhalb des Meldezeitraums", kategorien["ausserhalb"]),
         ("Ohne Rechnung, keine Lieferung", kategorien["nicht_versendet"]),
+        ("Inlandsumsätze (USt-Voranmeldung)", kategorien["inland"]),
     ]
     gesamt_netto = gesamt_steuer = Decimal(0)
     gesamt_anzahl = 0
@@ -432,6 +441,9 @@ def main():
                    help="Datum, das den Meldezeitraum bestimmt: Bestelleingang "
                         "(Vorgabe) oder Rechnungsdatum, das hier zugleich das "
                         "Versanddatum ist (§ 3 Abs. 6 UStG)")
+    p.add_argument("--inland", default=INLAND, metavar="LAND",
+                   help="Sitzland des Verkäufers; Lieferungen dorthin sind "
+                        f"Inlandsumsätze und gehören nicht ins OSS (Vorgabe {INLAND})")
     p.add_argument("--xlsx", help="Zusätzlich eine Excel-Mappe schreiben")
     args = p.parse_args()
 
@@ -440,7 +452,7 @@ def main():
     if not belege:
         sys.exit("Keine auswertbaren Belege in der Datei gefunden.")
 
-    kategorien = klassifizieren(belege, start, ende, args.basis)
+    kategorien = klassifizieren(belege, start, ende, args.basis, args.inland.upper())
     summen = summieren(kategorien["fernverkauf"])
     im_zeitraum = [b for b in belege
                    if (t := stichtag(b, args.basis)) and start <= t <= ende]
