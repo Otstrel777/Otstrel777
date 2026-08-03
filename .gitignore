@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Personal documents — must not be published to this public repo
+*.pdf
