@@ -195,10 +195,6 @@ function formatOrder_(o) {
   if (extra.length) money += ' · ' + esc_(extra.join(' · '));
   L.push(money);
 
-  if (o.orderId) {
-    L.push('🔗 <a href="https://www.etsy.com/your/orders/sold?order_id=' + o.orderId +
-      '">Открыть заказ на Etsy</a>');
-  }
   let msg = L.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   if (msg.length > 4000) msg = msg.slice(0, 3990) + '\n…';
   return msg;
