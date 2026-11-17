@@ -447,8 +447,8 @@ function cellToBlob_(cell) {
     const drive = s.match(/\/d\/([\w-]{20,})/) || s.match(/[?&]id=([\w-]{20,})/);
     if (drive) {
       const blob = DriveApp.getFileById(drive[1]).getBlob();
-      if (!/^image\//.test(blob.getContentType()) || blob.getBytes().length > 10e6) {
-        Logger.log('Файл не картинка или больше 10 МБ: ' + s);
+      if (!/^image\/(jpeg|png|webp)/.test(blob.getContentType()) || blob.getBytes().length > 10e6) {
+        Logger.log('Нужен JPG/PNG до 10 МБ (HEIC с iPhone Telegram не принимает): ' + s);
         return null;
       }
       return blob;
