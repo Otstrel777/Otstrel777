@@ -18,6 +18,8 @@ const LABEL_NAME = 'Etsy/Отправлено в TG';
 const START_NUMBER = 1086;  // с какого номера начинать нумерацию заказов
 const DONE_EMOJI = '👍';    // реакция «заказ отправлен»
 const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
+// Слова, по которым товар считается комплектом (в названии или варианте). Обычное «set» не считается.
+const BUNDLE_WORDS = ['bundle', 'combo', 'бандл', 'комбо', 'комплект'];
 const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
 
 // ───────────────────────────── запуск ─────────────────────────────
@@ -275,6 +277,25 @@ const TOTAL_LABELS_ = {
   'vat': ['🧾', 'НДС (VAT)'], 'gift wrap': ['🎁', 'Упаковка'],
 };
 
+/**
+ * Комплект: слово из BUNDLE_WORDS в названии/варианте
+ * или размеры через плюс — «3 Small + 3 Medium», «3 SM + 3 MD», «3SM+3MD».
+ */
+function isBundle_(it) {
+  const text = [it.title].concat(it.variations || []).join(' \n ');
+  const low = text.toLowerCase();
+  if (BUNDLE_WORDS.some(w => low.indexOf(w.toLowerCase()) >= 0)) return true;
+  const size = '(?:x[\\s-]?)?(?:small|medium|large|sm|md|lg|s|m|l|xl)\\b';
+  return new RegExp('\\d+\\s*' + size + '[^\\n+&]{0,25}[+&]\\s*\\d+\\s*' + size, 'i').test(text);
+}
+
+function plural_(n, one, few, many) {
+  const a = n % 10, b = n % 100;
+  if (a === 1 && b !== 11) return one;
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return few;
+  return many;
+}
+
 function formatOrder_(o) {
   const L = [];
   if (o.repeat) L.push('🔁 <i>Повторная отправка (тест) — это не новый заказ</i>');
@@ -283,7 +304,8 @@ function formatOrder_(o) {
   L.push('');
 
   o.items.forEach((it, i) => {
-    const qty = it.quantity > 1 ? ' × <b>' + it.quantity + ' шт. ‼️</b>' : ' × 1';
+    const qty = isBundle_(it) ? ' × <b>' + it.quantity + ' ' + plural_(it.quantity, 'комплект', 'комплекта', 'комплектов') + ' ‼️</b>'
+      : it.quantity > 1 ? ' × <b>' + it.quantity + ' шт. ‼️</b>' : ' × 1';
     L.push('<b>' + (i + 1) + '. ' + esc_(it.title) + '</b>' + qty);
     it.variations.forEach(v => {
       const pm = v.match(/^Personali[sz]ation:\s*([\s\S]*)/i);
