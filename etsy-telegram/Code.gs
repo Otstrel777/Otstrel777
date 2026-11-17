@@ -72,6 +72,7 @@ function checkNewOrders() {
       thread.addLabel(label);
     }
 
+    retryPendingPhotos_();
     pollReactions_();
   } finally {
     lock.releaseLock();
@@ -363,9 +364,19 @@ function sendOrder_(o) {
     return telegram_('sendMediaGroup', payload);
   };
 
+  // Заказ ушёл текстом, хотя фото должно быть → запомнить, чтобы позже добавить фото в это же сообщение
+  const sendTextAwaitingPhoto = () => {
+    const res = sendTelegram_(text);
+    collect(res);
+    const hasPhotoSource = o.items.some(it => it.image) || sheetHasPhotos_(o);
+    if (caption && hasPhotoSource && res && res.result && res.result.message_id) {
+      markPhotoPending_(o, res.result.message_id, caption);
+    }
+  };
+
   if (!photos.length) {
-    Logger.log('Заказ #' + o.orderId + ': фото не найдены, отправляю текстом');
-    collect(sendTelegram_(text));
+    Logger.log('Заказ #' + o.orderId + ': фото не скачались, отправляю текстом — фото добавлю позже');
+    sendTextAwaitingPhoto();
     return;
   }
   let sent = false;
@@ -379,7 +390,69 @@ function sendOrder_(o) {
       Utilities.sleep(2000);
     }
   }
-  if (!sent || !caption) collect(sendTelegram_(text));
+  if (!sent) sendTextAwaitingPhoto();
+  else if (!caption) collect(sendTelegram_(text));
+}
+
+// ───────────────────────────── дозагрузка фото ─────────────────────────────
+// Если заказ ушёл без фото, при следующих проверках скрипт добавляет фото
+// в ЭТО ЖЕ сообщение (editMessageMedia): текст становится подписью, место в чате не меняется.
+
+const PHOTO_RETRY_MAX = 12; // попыток (раз в 5 минут ≈ 1 час)
+
+function markPhotoPending_(o, msgId, caption) {
+  const props = PropertiesService.getScriptProperties();
+  const key = 'T_' + o.orderId;
+  let t = {};
+  try { t = JSON.parse(props.getProperty(key) || '{}'); } catch (e) {}
+  t.pending = {
+    msg: msgId,
+    cap: caption,
+    items: o.items.map(it => ({ t: it.title, i: it.image })),
+    tries: 0,
+  };
+  props.setProperty(key, JSON.stringify(t));
+}
+
+function sheetHasPhotos_(o) {
+  try {
+    return o.items.some(it => sheetPhotosFor_(it.title).length > 0);
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Пробует добавить фото к заказам, которые ушли текстом. Вызывается в каждой проверке. */
+function retryPendingPhotos_() {
+  const props = PropertiesService.getScriptProperties();
+  loadTracked_().filter(t => t.pending).forEach(t => {
+    const p = t.pending;
+    const photos = collectPhotos_({ items: p.items.map(x => ({ title: x.t, image: x.i })) });
+    let done = false;
+    for (const blob of photos) {
+      try {
+        telegram_('editMessageMedia', {
+          chat_id: getProp_('TELEGRAM_CHAT_ID'),
+          message_id: String(p.msg),
+          media: JSON.stringify({ type: 'photo', media: 'attach://p0', caption: p.cap, parse_mode: 'HTML' }),
+          p0: blob,
+        });
+        done = true;
+        break;
+      } catch (e) {
+        Logger.log('Заказ #' + t.id + ': не удалось добавить фото к сообщению: ' + e.message);
+      }
+    }
+    p.tries++;
+    if (done) {
+      Logger.log('Заказ #' + t.id + ': фото добавлено к сообщению');
+      delete t.pending;
+    } else if (p.tries >= PHOTO_RETRY_MAX) {
+      Logger.log('Заказ #' + t.id + ': фото так и не удалось добавить, оставляю текстом');
+      delete t.pending;
+    }
+    props.setProperty('T_' + t.id, JSON.stringify(t));
+  });
 }
 
 /** Был ли заказ уже отправлен в группу. */
