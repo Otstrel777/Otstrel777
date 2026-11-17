@@ -20,6 +20,7 @@ const DONE_EMOJI = '👍';    // реакция «заказ отправлен�
 const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
 // Слова, по которым товар считается комплектом (ищутся только в варианте Size). Обычное «set» не считается.
 const BUNDLE_WORDS = ['bundle', 'combo', 'бандл', 'комбо', 'комплект'];
+const TEST_ORDER = 1099;    // какой заказ прислать функцией testOrder: наш номер (1099) или номер Etsy (4236960738)
 const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
 
 // ───────────────────────────── запуск ─────────────────────────────
@@ -131,6 +132,33 @@ function testLastOrder() {
   o.repeat = true;
   sendOrder_(o);
   Logger.log('Отправлен заказ: ' + msg.getSubject());
+}
+
+/**
+ * Тест: прислать заказ из TEST_ORDER ещё раз (с пометкой «повтор»).
+ * Впишите номер в начале скрипта, сохраните (Cmd+S) и запустите testOrder.
+ */
+function testOrder() {
+  const want = String(TEST_ORDER).trim().replace(/^#/, '');
+  let orderId = want;
+  if (want.length < 7) { // короткий — это наш номер 1099, ищем номер заказа Etsy
+    let map = {};
+    try { map = JSON.parse(PropertiesService.getScriptProperties().getProperty('ORDER_NUMBERS') || '{}'); } catch (e) {}
+    orderId = Object.keys(map).filter(id => String(map[id]) === want)[0];
+    if (!orderId) throw new Error('Заказ с номером ' + want + ') не найден. Укажите номер заказа Etsy (например 4236960738).');
+  }
+  const threads = GmailApp.search('subject:"You made a sale on Etsy" subject:' + orderId, 0, 5);
+  for (const th of threads) {
+    for (const msg of th.getMessages()) {
+      if (msg.getSubject().indexOf(orderId) < 0) continue;
+      const o = parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate());
+      o.repeat = true;
+      sendOrder_(o);
+      Logger.log('Отправлен заказ #' + orderId + ': ' + msg.getSubject());
+      return;
+    }
+  }
+  throw new Error('Письмо заказа #' + orderId + ' не найдено во второй почте.');
 }
 
 /** Тест: прислать сводку прямо сейчас. */
