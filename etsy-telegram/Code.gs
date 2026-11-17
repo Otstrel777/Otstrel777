@@ -20,6 +20,11 @@ const DONE_EMOJI = '👍';    // реакция «заказ отправлен�
 const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
 // Слова, по которым товар считается комплектом (ищутся только в варианте Size). Обычное «set» не считается.
 const BUNDLE_WORDS = ['bundle', 'combo', 'бандл', 'комбо', 'комплект'];
+// Упаковка для ящиков TROFAST и кровати KURA (по названию листинга) — строка в конце заказа.
+const PACKAGING = {
+  trofast: { de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+  kura:    { de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',    other: 'Warenpost 35×25×5 см' },
+};
 const TEST_ORDER = 1099;    // какой заказ прислать функцией testOrder: наш номер (1099) или номер Etsy (4236960738)
 const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
 
@@ -331,6 +336,22 @@ function trofastSide_(it) {
     ? '<b>Длинный ‼️</b>' : 'Обычный';
 }
 
+/**
+ * Упаковка для TROFAST / KURA по стране доставки (последняя строка адреса).
+ * Германия → de, США → us, остальные страны → other. Другие товары → null.
+ */
+function packagingHint_(o) {
+  const titles = (o.items || []).map(it => it.title || '').join(' \n ');
+  const kind = /kura/i.test(titles) ? 'kura' : /trofast/i.test(titles) ? 'trofast' : null;
+  if (!kind) return null;
+  const lines = String(o.address || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const country = (lines[lines.length - 1] || '').toLowerCase();
+  if (!country) return null;
+  const zone = /^(germany|deutschland)$/.test(country) ? 'de'
+    : /^(united states|united states of america|usa|us)$/.test(country) ? 'us' : 'other';
+  return PACKAGING[kind][zone];
+}
+
 function plural_(n, one, few, many) {
   const a = n % 10, b = n % 100;
   if (a === 1 && b !== 11) return one;
@@ -392,6 +413,9 @@ function formatOrder_(o) {
     if (o.tax.value) L.push('   Стоимость заказа для посылки: <b>' + esc_(o.tax.value) + '</b>');
     if (!o.tax.ids.length) L.push('   (номер не распознан — см. письмо)');
   }
+
+  const pack = packagingHint_(o);
+  if (pack) L.push('', '📫 <b>' + esc_(pack) + '</b>');
 
   let msg = L.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   if (msg.length > 4000) msg = msg.slice(0, 3990) + '\n…';
