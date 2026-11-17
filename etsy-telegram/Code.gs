@@ -20,11 +20,18 @@ const DONE_EMOJI = '👍';    // реакция «заказ отправлен�
 const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
 // Слова, по которым товар считается комплектом (ищутся только в варианте Size). Обычное «set» не считается.
 const BUNDLE_WORDS = ['bundle', 'combo', 'бандл', 'комбо', 'комплект'];
-// Упаковка для ящиков TROFAST и кровати KURA (по названию листинга) — строка в конце заказа.
-const PACKAGING = {
-  trofast: { de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
-  kura:    { de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',    other: 'Warenpost 35×25×5 см' },
-};
+// Упаковка по категориям (ищется в названии листинга) — строка в конце заказа.
+// Если в заказе несколько категорий, берётся первая подходящая сверху.
+const PACKAGING = [
+  { name: 'KURA',      match: /kura/i,
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',    other: 'Warenpost 35×25×5 см' },
+  { name: 'DUKTIG',    match: /duktig/i,
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+  { name: 'Dollhouse', match: /doll\s*-?house|puppenhaus/i,
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+  { name: 'TROFAST',   match: /trofast/i,
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+];
 const TEST_ORDER = 1099;    // какой заказ прислать функцией testOrder: наш номер (1099) или номер Etsy (4236960738)
 const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
 
@@ -337,19 +344,19 @@ function trofastSide_(it) {
 }
 
 /**
- * Упаковка для TROFAST / KURA по стране доставки (последняя строка адреса).
- * Германия → de, США → us, остальные страны → other. Другие товары → null.
+ * Упаковка по категории товара (PACKAGING) и стране доставки (последняя строка адреса).
+ * Германия → de, США → us, остальные страны → other. Товары без категории → null.
  */
 function packagingHint_(o) {
   const titles = (o.items || []).map(it => it.title || '').join(' \n ');
-  const kind = /kura/i.test(titles) ? 'kura' : /trofast/i.test(titles) ? 'trofast' : null;
-  if (!kind) return null;
+  const rule = PACKAGING.filter(r => r.match.test(titles))[0];
+  if (!rule) return null;
   const lines = String(o.address || '').split('\n').map(s => s.trim()).filter(Boolean);
   const country = (lines[lines.length - 1] || '').toLowerCase();
   if (!country) return null;
   const zone = /^(germany|deutschland)$/.test(country) ? 'de'
     : /^(united states|united states of america|usa|us)$/.test(country) ? 'us' : 'other';
-  return PACKAGING[kind][zone];
+  return rule[zone];
 }
 
 function plural_(n, one, few, many) {
