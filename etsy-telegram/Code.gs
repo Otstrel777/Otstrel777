@@ -92,9 +92,10 @@ function dailySummary() {
     const overdue = [], dueToday = [];
 
     loadTracked_().forEach(t => {
-      if (t.ok.length || !t.ship) return;
+      if (t.ok.length || !t.ship || t.ship > today) return;
+      if (deletedFromChat_(t)) return; // сообщение заказа удалили из чата — не напоминаем
       if (t.ship < today) overdue.push(t);
-      else if (t.ship === today) dueToday.push(t);
+      else dueToday.push(t);
     });
     overdue.sort((a, b) => a.ship < b.ship ? -1 : 1);
 
@@ -778,6 +779,33 @@ function pollReactions_() {
   const save = { TG_OFFSET: String(updates[updates.length - 1].update_id + 1), SEEN_CHATS: JSON.stringify(seen) };
   Object.keys(changed).forEach(id => { save['T_' + id] = JSON.stringify(changed[id]); });
   props.setProperties(save);
+}
+
+/**
+ * Удалены ли из чата ВСЕ сообщения заказа. Telegram не сообщает боту об удалениях,
+ * поэтому проверяем «пустой правкой» (без видимых изменений):
+ * есть сообщение → «message is not modified», удалено → «message to edit not found».
+ * Если все сообщения удалены — заказ убирается из отслеживания.
+ */
+function deletedFromChat_(t) {
+  const msgs = t.msgs || [];
+  if (!msgs.length) return false;
+  const chat = getProp_('TELEGRAM_CHAT_ID');
+  for (const id of msgs) {
+    try {
+      telegram_('editMessageReplyMarkup', {
+        chat_id: chat,
+        message_id: String(id),
+        reply_markup: JSON.stringify({ inline_keyboard: [] }),
+      });
+      return false; // правка прошла — сообщение есть
+    } catch (e) {
+      if (!/message to edit not found|message_id_invalid|message not found/i.test(e.message)) return false;
+    }
+  }
+  PropertiesService.getScriptProperties().deleteProperty('T_' + t.id);
+  Logger.log('Заказ ' + t.n + ') #' + t.id + ' удалён из чата — больше не отслеживаю');
+  return true;
 }
 
 /** Удаляет записи об отправленных заказах старше 14 дней и любых заказах старше 60 дней. */
