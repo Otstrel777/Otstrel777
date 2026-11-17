@@ -10,6 +10,7 @@
  *        TELEGRAM_CHAT_ID   = id группы (узнать функцией getChatId)
  *   2. Сделать бота администратором группы (нужно, чтобы он видел реакции 👍).
  *   3. Запустить функцию setup — она создаст расписание и пришлёт тест в группу.
+ *   4. (по желанию) Запустить createPhotoSheet — создаст таблицу «заголовок листинга → фото».
  */
 
 const QUERY = 'subject:"You made a sale on Etsy" newer_than:3d';
@@ -17,6 +18,7 @@ const LABEL_NAME = 'Etsy/Отправлено в TG';
 const START_NUMBER = 1086;  // с какого номера начинать нумерацию заказов
 const DONE_EMOJI = '👍';    // реакция «заказ отправлен»
 const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
+const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
 
 // ───────────────────────────── запуск ─────────────────────────────
 
@@ -262,8 +264,7 @@ function formatOrder_(o) {
 function sendOrder_(o) {
   o.num = orderNumber_(o.orderId);
   const text = formatOrder_(o);
-  const urls = Array.from(new Set(o.items.map(it => it.image).filter(Boolean))).slice(0, 10);
-  const photos = urls.map(fetchPhoto_).filter(Boolean);
+  const photos = collectPhotos_(o);
   const ids = [];
   const collect = res => [].concat(res && res.result || []).forEach(r => r.message_id && ids.push(r.message_id));
 
@@ -328,14 +329,168 @@ function fetchPhoto_(url) {
   for (const u of big !== url ? [big, url] : [url]) {
     try {
       const res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
-      if (res.getResponseCode() === 200 && /^image\//.test(res.getHeaders()['Content-Type'] || '')) {
-        return res.getBlob().setName('item.jpg');
-      }
+      if (okImage_(res)) return res.getBlob().setName('item.jpg');
     } catch (e) {
       Logger.log('Не удалось скачать ' + u + ': ' + e.message);
     }
   }
   return null;
+}
+
+// ───────────────────────────── фото из таблицы ─────────────────────────────
+// Таблица: A — заголовок листинга, B, C, D… — фото (ссылка с Google Диска,
+// прямая ссылка на картинку, =IMAGE("…") или картинка, вставленная в ячейку).
+
+/** Фото для заказа: из письма + из таблицы (не больше 10 — лимит альбома Telegram). */
+function collectPhotos_(o) {
+  const emailUrls = Array.from(new Set(o.items.map(it => it.image).filter(Boolean)));
+  const sheetCells = [];
+  const seen = {};
+  Array.from(new Set(o.items.map(it => it.title))).forEach(title => {
+    sheetPhotosFor_(title).forEach(c => {
+      if (!seen[c.key]) { seen[c.key] = true; sheetCells.push(c); }
+    });
+  });
+
+  const fromSheet = () => sheetCells.map(cellToBlob_).filter(Boolean);
+  const fromEmail = () => emailUrls.map(fetchPhoto_).filter(Boolean);
+  let photos;
+  if (SHEET_PHOTOS === 'replace') {
+    photos = fromSheet();
+    if (!photos.length) photos = fromEmail();
+  } else {
+    photos = fromEmail().concat(fromSheet());
+  }
+  return photos.slice(0, 10);
+}
+
+let SHEET_CACHE_ = null;
+
+function photoSheet_() {
+  const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!id) return null;
+  try {
+    const ss = SpreadsheetApp.openById(id.replace(/^.*\/d\/([\w-]+).*$/, '$1'));
+    return ss.getSheetByName('Фото') || ss.getSheets()[0];
+  } catch (e) {
+    Logger.log('Таблица с фото недоступна: ' + e.message);
+    return null;
+  }
+}
+
+/** Строки таблицы: [{ title, norm, cells: [{ key, value, formula }] }] — читается один раз за запуск. */
+function sheetRows_() {
+  if (SHEET_CACHE_) return SHEET_CACHE_;
+  SHEET_CACHE_ = [];
+  const sh = photoSheet_();
+  if (!sh || sh.getLastRow() < 2) return SHEET_CACHE_;
+  const range = sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(sh.getLastColumn(), 2));
+  const values = range.getValues();
+  const formulas = range.getFormulas();
+  values.forEach((row, r) => {
+    const title = String(row[0] || '').trim();
+    if (!title) return;
+    const cells = [];
+    for (let c = 1; c < row.length; c++) {
+      const v = row[c], f = formulas[r][c];
+      if (!v && !f) continue;
+      const key = f || (typeof v === 'string' ? v.trim() : 'img:' + (r + 2) + ':' + (c + 1));
+      cells.push({ key: key, value: v, formula: f });
+    }
+    SHEET_CACHE_.push({ title: title, norm: normTitle_(title), cells: cells });
+  });
+  return SHEET_CACHE_;
+}
+
+function normTitle_(s) {
+  return String(s).toLowerCase()
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[\s\u00a0]+/g, ' ')
+    .replace(/[\s.,;:!-]+$/, '')
+    .trim();
+}
+
+/** Фото для заголовка. Незнакомый заголовок дописывается в таблицу, чтобы вы добавили к нему фото. */
+function sheetPhotosFor_(title) {
+  const sh = photoSheet_();
+  if (!sh) return [];
+  const rows = sheetRows_();
+  const n = normTitle_(title);
+  let best = rows.find(r => r.norm === n);
+  if (!best) {
+    // заголовок в таблице мог быть сокращён — ищем самое длинное совпадение начала
+    rows.filter(r => r.norm.length >= 15 && (n.indexOf(r.norm) === 0 || r.norm.indexOf(n) === 0))
+      .forEach(r => { if (!best || r.norm.length > best.norm.length) best = r; });
+  }
+  if (!best) {
+    sh.appendRow([title]);
+    rows.push({ title: title, norm: n, cells: [] });
+    return [];
+  }
+  return best.cells;
+}
+
+/** Ячейка таблицы → картинка. */
+function cellToBlob_(cell) {
+  try {
+    const f = String(cell.formula || '').match(/IMAGE\(\s*"([^"]+)"/i);
+    if (f) return fetchPhoto_(f[1]);
+
+    const v = cell.value;
+    if (v && typeof v === 'object' && typeof v.getContentUrl === 'function') { // картинка в ячейке
+      const res = UrlFetchApp.fetch(v.getContentUrl(), {
+        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+      return okImage_(res) ? res.getBlob().setName('item.jpg') : null;
+    }
+
+    const s = String(v || '').trim();
+    const drive = s.match(/\/d\/([\w-]{20,})/) || s.match(/[?&]id=([\w-]{20,})/);
+    if (drive) {
+      const blob = DriveApp.getFileById(drive[1]).getBlob();
+      if (!/^image\//.test(blob.getContentType()) || blob.getBytes().length > 10e6) {
+        Logger.log('Файл не картинка или больше 10 МБ: ' + s);
+        return null;
+      }
+      return blob;
+    }
+    if (/^https?:\/\//i.test(s)) return fetchPhoto_(s);
+  } catch (e) {
+    Logger.log('Не удалось взять фото из таблицы (' + cell.key + '): ' + e.message);
+  }
+  return null;
+}
+
+function okImage_(res) {
+  return res.getResponseCode() === 200 &&
+    /^image\//.test(res.getHeaders()['Content-Type'] || res.getHeaders()['content-type'] || '');
+}
+
+/** Создаёт таблицу «Заголовок листинга → фото» и вписывает заголовки из уже пришедших заказов. */
+function createPhotoSheet() {
+  const props = PropertiesService.getScriptProperties();
+  const existing = photoSheet_();
+  if (existing) {
+    Logger.log('Таблица уже есть: ' + existing.getParent().getUrl());
+    return;
+  }
+  const ss = SpreadsheetApp.create('Etsy — фото листингов');
+  const sh = ss.getSheets()[0].setName('Фото');
+  sh.getRange(1, 1, 1, 6).setValues([['Заголовок листинга (как в Etsy)', 'Фото 1', 'Фото 2', 'Фото 3', 'Фото 4', 'Фото 5']])
+    .setFontWeight('bold').setBackground('#f1f3f4');
+  sh.setFrozenRows(1);
+  sh.setColumnWidth(1, 420);
+
+  const titles = {};
+  GmailApp.search('subject:"You made a sale on Etsy"', 0, 200).forEach(t => t.getMessages().forEach(m => {
+    if (/You made a sale on Etsy/i.test(m.getSubject())) {
+      parseOrder_(m.getSubject(), m.getBody(), m.getDate()).items.forEach(it => { titles[it.title] = true; });
+    }
+  }));
+  const list = Object.keys(titles).sort();
+  if (list.length) sh.getRange(2, 1, list.length, 1).setValues(list.map(t => [t]));
+
+  props.setProperty('SHEET_ID', ss.getId());
+  Logger.log('Таблица создана: ' + ss.getUrl() + '  (заголовков из заказов: ' + list.length + ')');
 }
 
 // ───────────────────────────── сроки и реакции 👍 ─────────────────────────────
