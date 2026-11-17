@@ -52,18 +52,25 @@ function checkNewOrders() {
   if (!lock.tryLock(10000)) return;
   try {
     const label = getLabel_();
+    const started = Date.now();
     const threads = GmailApp.search(QUERY, 0, 50).filter(
       t => !t.getLabels().some(l => l.getName() === LABEL_NAME));
 
     // от старых к новым
-    threads.reverse().forEach(thread => {
+    for (const thread of threads.reverse()) {
+      if (Date.now() - started > 4 * 60 * 1000) break; // остальное — в следующий запуск
       thread.getMessages().forEach(msg => {
         if (!/You made a sale on Etsy/i.test(msg.getSubject())) return;
-        sendOrder_(parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate()));
+        const o = parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate());
+        if (alreadySent_(o.orderId)) {
+          Logger.log('Заказ #' + o.orderId + ' уже был отправлен — повторно не шлю');
+          return;
+        }
+        sendOrder_(o);
         Utilities.sleep(500);
       });
       thread.addLabel(label);
-    });
+    }
 
     pollReactions_();
   } finally {
@@ -110,13 +117,15 @@ function dailySummary() {
   }
 }
 
-/** Тест: отправить в группу последний заказ (даже если он уже отправлялся). */
+/** Тест: отправить в группу последний заказ ещё раз (с пометкой «повтор»). */
 function testLastOrder() {
   const threads = GmailApp.search('subject:"You made a sale on Etsy"', 0, 1);
   if (!threads.length) throw new Error('Писем «You made a sale on Etsy» не найдено');
   const msgs = threads[0].getMessages();
   const msg = msgs[msgs.length - 1];
-  sendOrder_(parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate()));
+  const o = parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate());
+  o.repeat = true;
+  sendOrder_(o);
   Logger.log('Отправлен заказ: ' + msg.getSubject());
 }
 
@@ -199,14 +208,10 @@ function parseOrder_(subject, html, date) {
 
   // Итоги и примечания — по тексту письма
   const text = toText_(html);
-  const after = label => {
-    const r = new RegExp(label + ':?\\s*\\n?\\s*([^\\n]+)', 'i');
-    const x = text.match(r);
-    return x ? x[1].trim() : '';
-  };
-  o.discount = after('Discount');
-  o.shipping = after('Shipping(?! address| internationally)');
-  if (!o.total) o.total = after('Order total');
+  o.totals = parseTotals_(text);
+  const grand = o.totals.filter(t => /^order total$/i.test(t.label))[0];
+  if (grand) o.total = grand.value;
+  o.tax = parseTaxNotice_(text);
   m = text.match(/applied these discounts:\s*([^\n]+)/i);
   if (m) o.coupons = Array.from(new Set(m[1].split(',').map(s => s.trim()).filter(Boolean))).join(', ');
   m = text.match(/(?:Note|Message) from[^\n]*\n+([\s\S]*?)\n\s*\n/i);
@@ -220,8 +225,58 @@ function parseOrder_(subject, html, date) {
   return o;
 }
 
+/**
+ * Блок «Order total» из письма: [{ label: 'Item total', value: '€29,00' }, ...].
+ * Берём только строки после заголовка «Order total», чтобы не путать с текстом про доставку выше.
+ */
+function parseTotals_(text) {
+  const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+  let i = lines.lastIndexOf('Order total');
+  if (i < 0) i = lines.findIndex(l => /^Item total:?$/i.test(l)) - 1;
+  if (i < -1) return [];
+  const out = [];
+  for (let k = i + 1; k < lines.length - 1 && out.length < 12; k++) {
+    const lm = lines[k].match(/^([A-Za-z][A-Za-z ()]+):\s*(.*)$/);
+    if (!lm) break;
+    const value = lm[2] || lines[++k];
+    out.push({ label: lm[1].trim(), value: value.trim() });
+    if (/^order total$/i.test(lm[1].trim())) break;
+  }
+  return out;
+}
+
+/**
+ * Налоговая пометка Etsy (UK VAT, Норвегия VOEC, IOSS и т. п.):
+ * { title, ids: [{ kind, id }], value } или null.
+ */
+function parseTaxNotice_(text) {
+  const start = text.search(/Double check any customs requirements[^\n]*\n/i);
+  const end = text.search(/\nSell with confidence/i);
+  if (start < 0 || end < 0 || end <= start) return null;
+  const block = text.slice(start, end).split('\n').slice(1).map(s => s.trim())
+    .filter(l => l && !/^learn more\.?$/i.test(l) && !/^using shipping labels/i.test(l));
+  if (!block.length) return null;
+  const all = block.join(' ');
+  const ids = [];
+  const re = /\b(VAT|VOEC|IOSS|OSS|ARN|ABN|GST|IRD|UID|tax)\b[^.()]{0,40}?\bnumber\b[^A-Za-z0-9]{0,5}(?:is\s+)?([A-Z]{0,4}\s?\d[\d ]{3,}\d)/gi;
+  let m;
+  while ((m = re.exec(all)) !== null) {
+    const id = m[2].trim();
+    if (!ids.some(x => x.id === id)) ids.push({ kind: m[1].toUpperCase(), id: id });
+  }
+  const v = all.match(/value of this order in [a-z]+,\s*(.+?),\s*on your package/i);
+  return { title: block[0], ids: ids, value: v ? v[1].trim() : '' };
+}
+
+const TOTAL_LABELS_ = {
+  'item total': ['💰', 'Товары'], 'discount': ['🏷', 'Скидка'], 'subtotal': ['➖', 'Подытог'],
+  'shipping': ['🚚', 'Доставка'], 'tax': ['🧾', 'Налог'], 'sales tax': ['🧾', 'Налог (sales tax)'],
+  'vat': ['🧾', 'НДС (VAT)'], 'gift wrap': ['🎁', 'Упаковка'],
+};
+
 function formatOrder_(o) {
   const L = [];
+  if (o.repeat) L.push('🔁 <i>Повторная отправка (тест) — это не новый заказ</i>');
   L.push((o.num ? '<b>' + o.num + ')</b> ' : '') + '🛍 <b>Новый заказ #' + esc_(o.orderId || '?') + '</b>');
   if (o.shipBy) L.push('📦 Отправить до: <b>' + esc_(ruDate_(o.shipBy)) + '</b>');
   L.push('');
@@ -244,14 +299,32 @@ function formatOrder_(o) {
   if (o.address) L.push('📍 <code>' + esc_(o.address) + '</code>');
   L.push('');
 
-  let money = '💰 <b>' + esc_(o.total || '—') + '</b>';
-  const extra = [];
-  if (o.shipping) extra.push('доставка ' + o.shipping);
-  if (o.discount && !/^-?\s*\D*0[,.]00$/.test(o.discount)) {
-    extra.push('скидка ' + o.discount.replace(/^-\s*/, '−') + (o.coupons ? ' (' + o.coupons + ')' : ''));
+  // Разбивка суммы — как в письме
+  const isZero = v => /^-?\s*\D*0([.,]0+)?\s*\D*$/.test(v);
+  (o.totals || []).forEach(t => {
+    const key = t.label.toLowerCase();
+    if (key === 'order total') return;
+    if ((key === 'discount' || key.indexOf('tax') >= 0 || key === 'vat') && isZero(t.value)) return;
+    const lbl = TOTAL_LABELS_[key] || ['•', t.label];
+    let val = t.value.replace(/^-\s*/, '−');
+    if (key === 'discount' && o.coupons) val += ' (' + o.coupons + ')';
+    L.push(lbl[0] + ' ' + lbl[1] + ': ' + esc_(val));
+  });
+  L.push('💶 <b>Итого: ' + esc_(o.total || '—') + '</b>');
+
+  // Налоговый номер для посылки
+  if (o.tax) {
+    L.push('');
+    L.push('📮 <b>Налог для посылки</b> <i>(' + esc_(o.tax.title) + ')</i>');
+    o.tax.ids.forEach(x => {
+      const what = x.kind === 'VOEC' ? 'VOEC-номер Etsy (указать при оформлении отправки)'
+        : x.kind === 'VAT' ? 'VAT-номер Etsy (написать на посылке)'
+        : x.kind + '-номер Etsy';
+      L.push('   ' + what + ': <code>' + esc_(x.id) + '</code>');
+    });
+    if (o.tax.value) L.push('   Стоимость заказа для посылки: <b>' + esc_(o.tax.value) + '</b>');
+    if (!o.tax.ids.length) L.push('   (номер не распознан — см. письмо)');
   }
-  if (extra.length) money += ' · ' + esc_(extra.join(' · '));
-  L.push(money);
 
   let msg = L.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   if (msg.length > 4000) msg = msg.slice(0, 3990) + '\n…';
@@ -265,36 +338,59 @@ function sendOrder_(o) {
   o.num = orderNumber_(o.orderId);
   const text = formatOrder_(o);
   const photos = collectPhotos_(o);
-  const ids = [];
-  const collect = res => [].concat(res && res.result || []).forEach(r => r.message_id && ids.push(r.message_id));
+  // id отправленных сообщений сохраняем сразу — если запуск оборвётся, заказ не уйдёт второй раз
+  const collect = res => {
+    const ids = [];
+    [].concat(res && res.result || []).forEach(r => r.message_id && ids.push(r.message_id));
+    trackOrder_(o, ids);
+  };
+  const caption = text.length <= 1024 ? text : null; // лимит подписи к фото в Telegram
+
+  const sendPhotos = list => {
+    if (list.length === 1) {
+      const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID'), photo: list[0] };
+      if (caption) { payload.caption = caption; payload.parse_mode = 'HTML'; }
+      return telegram_('sendPhoto', payload);
+    }
+    const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID') };
+    const media = list.map((blob, i) => {
+      payload['p' + i] = blob;
+      const item = { type: 'photo', media: 'attach://p' + i };
+      if (i === 0 && caption) { item.caption = caption; item.parse_mode = 'HTML'; }
+      return item;
+    });
+    payload.media = JSON.stringify(media);
+    return telegram_('sendMediaGroup', payload);
+  };
 
   if (!photos.length) {
+    Logger.log('Заказ #' + o.orderId + ': фото не найдены, отправляю текстом');
     collect(sendTelegram_(text));
-  } else {
-    const caption = text.length <= 1024 ? text : null; // лимит подписи к фото в Telegram
+    return;
+  }
+  let sent = false;
+  for (const attempt of [photos, photos.slice(0, 1)]) { // 2-я попытка — только первое фото
     try {
-      if (photos.length === 1) {
-        const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID'), photo: photos[0] };
-        if (caption) { payload.caption = caption; payload.parse_mode = 'HTML'; }
-        collect(telegram_('sendPhoto', payload));
-      } else {
-        const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID') };
-        const media = photos.map((blob, i) => {
-          payload['p' + i] = blob;
-          const item = { type: 'photo', media: 'attach://p' + i };
-          if (i === 0 && caption) { item.caption = caption; item.parse_mode = 'HTML'; }
-          return item;
-        });
-        payload.media = JSON.stringify(media);
-        collect(telegram_('sendMediaGroup', payload));
-      }
-      if (!caption) collect(sendTelegram_(text));
+      collect(sendPhotos(attempt));
+      sent = true;
+      break;
     } catch (e) {
-      Logger.log('Фото не отправилось: ' + e.message);
-      collect(sendTelegram_(text));
+      Logger.log('Заказ #' + o.orderId + ': фото не отправилось (' + attempt.length + ' шт.): ' + e.message);
+      Utilities.sleep(2000);
     }
   }
-  trackOrder_(o, ids);
+  if (!sent || !caption) collect(sendTelegram_(text));
+}
+
+/** Был ли заказ уже отправлен в группу. */
+function alreadySent_(orderId) {
+  if (!orderId) return false;
+  try {
+    const t = JSON.parse(PropertiesService.getScriptProperties().getProperty('T_' + orderId) || '{}');
+    return !!(t.msgs && t.msgs.length);
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -328,8 +424,13 @@ function fetchPhoto_(url) {
   const big = url.replace(/\/il_\d+x\d+\./, '/il_570xN.');
   for (const u of big !== url ? [big, url] : [url]) {
     try {
-      const res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
+      const res = UrlFetchApp.fetch(u, {
+        muteHttpExceptions: true,
+        headers: { Accept: 'image/jpeg,image/png;q=0.9,image/webp;q=0.5' }, // без AVIF — Telegram его не берёт
+      });
       if (okImage_(res)) return res.getBlob().setName('item.jpg');
+      Logger.log('Фото не скачалось (' + res.getResponseCode() + ', ' +
+        (res.getHeaders()['Content-Type'] || '?') + '): ' + u);
     } catch (e) {
       Logger.log('Не удалось скачать ' + u + ': ' + e.message);
     }
@@ -462,7 +563,7 @@ function cellToBlob_(cell) {
 
 function okImage_(res) {
   return res.getResponseCode() === 200 &&
-    /^image\//.test(res.getHeaders()['Content-Type'] || res.getHeaders()['content-type'] || '');
+    /^image\/(jpeg|jpg|png|webp)/i.test(res.getHeaders()['Content-Type'] || res.getHeaders()['content-type'] || '');
 }
 
 /** Создаёт таблицу «Заголовок листинга → фото» и вписывает заголовки из уже пришедших заказов. */
