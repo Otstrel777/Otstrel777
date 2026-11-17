@@ -18,7 +18,7 @@ const LABEL_NAME = 'Etsy/Отправлено в TG';
 const START_NUMBER = 1086;  // с какого номера начинать нумерацию заказов
 const DONE_EMOJI = '👍';    // реакция «заказ отправлен»
 const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
-// Слова, по которым товар считается комплектом (в названии или варианте). Обычное «set» не считается.
+// Слова, по которым товар считается комплектом (ищутся только в варианте Size). Обычное «set» не считается.
 const BUNDLE_WORDS = ['bundle', 'combo', 'бандл', 'комбо', 'комплект'];
 const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
 
@@ -278,11 +278,13 @@ const TOTAL_LABELS_ = {
 };
 
 /**
- * Комплект: слово из BUNDLE_WORDS в названии/варианте
- * или размеры через плюс — «3 Small + 3 Medium», «3 SM + 3 MD», «3SM+3MD».
+ * Комплект: в варианте Size есть слово из BUNDLE_WORDS
+ * или размеры через плюс — «3 Small + 3 Medium», «3 SM + 3 MD», «BUNDLE ( 3 sm + 3md)».
+ * Название листинга и другие варианты (цвет, персонализация) не учитываются.
  */
 function isBundle_(it) {
-  const text = [it.title].concat(it.variations || []).join(' \n ');
+  const text = (it.variations || []).filter(v => /^\s*(size|размер)\b/i.test(v)).join(' \n ');
+  if (!text) return false;
   const low = text.toLowerCase();
   if (BUNDLE_WORDS.some(w => low.indexOf(w.toLowerCase()) >= 0)) return true;
   const size = '(?:x[\\s-]?)?(?:small|medium|large|sm|md|lg|s|m|l|xl)\\b';
