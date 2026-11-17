@@ -2,17 +2,21 @@
  * Etsy → Telegram
  * Каждые 5 минут ищет в Gmail письма «You made a sale on Etsy»
  * и отправляет заказ в группу Telegram.
+ * Раз в день присылает сводку: какие заказы просрочены (нет реакции 👍 после срока отправки).
  *
  * Настройка (один раз):
  *   1. Настройки проекта ⚙️ → «Свойства скрипта» → добавить:
  *        TELEGRAM_BOT_TOKEN = токен от @BotFather
  *        TELEGRAM_CHAT_ID   = id группы (узнать функцией getChatId)
- *   2. Запустить функцию setup — она создаст расписание и пришлёт тест в группу.
+ *   2. Сделать бота администратором группы (нужно, чтобы он видел реакции 👍).
+ *   3. Запустить функцию setup — она создаст расписание и пришлёт тест в группу.
  */
 
 const QUERY = 'subject:"You made a sale on Etsy" newer_than:3d';
 const LABEL_NAME = 'Etsy/Отправлено в TG';
-const START_NUMBER = 1086; // с какого номера начинать нумерацию заказов
+const START_NUMBER = 1086;  // с какого номера начинать нумерацию заказов
+const DONE_EMOJI = '👍';    // реакция «заказ отправлен»
+const SUMMARY_HOUR = 9;     // во сколько присылать сводку (час, по часовому поясу проекта)
 
 // ───────────────────────────── запуск ─────────────────────────────
 
@@ -27,12 +31,17 @@ function setup() {
   old.forEach(t => t.addLabel(label));
 
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'checkNewOrders')
+    .filter(t => ['checkNewOrders', 'dailySummary'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('checkNewOrders').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('dailySummary').timeBased().everyDays(1).atHour(SUMMARY_HOUR).create();
 
-  sendTelegram_('✅ Бот подключён. Новые заказы Etsy будут приходить сюда.');
-  Logger.log('Готово. Старых писем помечено: ' + old.length + '. Проверка каждые 5 минут.');
+  sendTelegram_('✅ Бот подключён. Новые заказы Etsy будут приходить сюда.\n' +
+    'Отправленный заказ отмечайте реакцией ' + DONE_EMOJI + '. Каждый день около ' +
+    SUMMARY_HOUR + ':00 придёт сводка по просроченным заказам.');
+  Logger.log('Готово. Старых писем помечено: ' + old.length +
+    '. Проверка каждые 5 минут, сводка каждый день в ' + SUMMARY_HOUR + ':00 (' +
+    Session.getScriptTimeZone() + ').');
 }
 
 /** Основная функция — её запускает расписание. */
@@ -48,11 +57,52 @@ function checkNewOrders() {
     threads.reverse().forEach(thread => {
       thread.getMessages().forEach(msg => {
         if (!/You made a sale on Etsy/i.test(msg.getSubject())) return;
-        sendOrder_(parseOrder_(msg.getSubject(), msg.getBody()));
+        sendOrder_(parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate()));
         Utilities.sleep(500);
       });
       thread.addLabel(label);
     });
+
+    pollReactions_();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Сводка по срокам отправки — её запускает расписание раз в день. */
+function dailySummary() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    pollReactions_();
+    const tz = Session.getScriptTimeZone();
+    const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    const overdue = [], dueToday = [];
+
+    loadTracked_().forEach(t => {
+      if (t.ok.length || !t.ship) return;
+      if (t.ship < today) overdue.push(t);
+      else if (t.ship === today) dueToday.push(t);
+    });
+    overdue.sort((a, b) => a.ship < b.ship ? -1 : 1);
+
+    const L = ['⏰ <b>Сводка по отправке — ' + ruDay_(today) + '</b>', ''];
+    if (overdue.length) {
+      L.push('🔴 <b>Просрочены (' + overdue.length + '):</b>');
+      overdue.forEach(t => L.push('• ' + orderRef_(t) + ' — до ' + ruDay_(t.ship) +
+        ', просрочен на ' + daysBetween_(t.ship, today) + ' дн.'));
+      L.push('');
+    }
+    if (dueToday.length) {
+      L.push('🟡 <b>Отправить сегодня (' + dueToday.length + '):</b>');
+      dueToday.forEach(t => L.push('• ' + orderRef_(t)));
+      L.push('');
+    }
+    if (!overdue.length && !dueToday.length) L.push('✅ Просроченных заказов нет.');
+    else L.push('Отправленный заказ отметьте реакцией ' + DONE_EMOJI + '.');
+
+    sendTelegram_(L.join('\n').trim());
+    cleanupTracked_(today);
   } finally {
     lock.releaseLock();
   }
@@ -64,19 +114,21 @@ function testLastOrder() {
   if (!threads.length) throw new Error('Писем «You made a sale on Etsy» не найдено');
   const msgs = threads[0].getMessages();
   const msg = msgs[msgs.length - 1];
-  sendOrder_(parseOrder_(msg.getSubject(), msg.getBody()));
+  sendOrder_(parseOrder_(msg.getSubject(), msg.getBody(), msg.getDate()));
   Logger.log('Отправлен заказ: ' + msg.getSubject());
+}
+
+/** Тест: прислать сводку прямо сейчас. */
+function testSummary() {
+  dailySummary();
 }
 
 /** Показывает id чатов, где писали боту. Сначала напишите что-нибудь в группе. */
 function getChatId() {
-  const token = getProp_('TELEGRAM_BOT_TOKEN');
-  const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getUpdates',
-    { muteHttpExceptions: true });
-  const data = JSON.parse(res.getContentText());
-  const chats = {};
+  const data = telegram_('getUpdates', {});
+  const chats = JSON.parse(PropertiesService.getScriptProperties().getProperty('SEEN_CHATS') || '{}');
   (data.result || []).forEach(u => {
-    const m = u.message || u.channel_post || u.my_chat_member || {};
+    const m = u.message || u.channel_post || u.my_chat_member || u.message_reaction || {};
     if (m.chat) chats[m.chat.id] = m.chat.title || m.chat.username || m.chat.first_name;
   });
   const ids = Object.keys(chats);
@@ -89,12 +141,15 @@ function getChatId() {
 
 // ───────────────────────────── разбор письма ─────────────────────────────
 
-function parseOrder_(subject, html) {
+function parseOrder_(subject, html, date) {
   const o = { items: [] };
 
   // Тема: You made a sale on Etsy - Ship by Nov 25 - [€21,90, Order #4236106400]
   let m = subject.match(/Ship by ([^-\[]+)/i);
-  if (m) o.shipBy = m[1].trim();
+  if (m) {
+    o.shipBy = m[1].trim();
+    o.shipDate = shipDate_(o.shipBy, date || new Date());
+  }
   m = subject.match(/\[(.+?),\s*Order #(\d+)\]/i);
   if (m) { o.total = m[1].trim(); o.orderId = m[2]; }
 
@@ -209,30 +264,36 @@ function sendOrder_(o) {
   const text = formatOrder_(o);
   const urls = Array.from(new Set(o.items.map(it => it.image).filter(Boolean))).slice(0, 10);
   const photos = urls.map(fetchPhoto_).filter(Boolean);
-  if (!photos.length) return sendTelegram_(text);
+  const ids = [];
+  const collect = res => [].concat(res && res.result || []).forEach(r => r.message_id && ids.push(r.message_id));
 
-  const caption = text.length <= 1024 ? text : null; // лимит подписи к фото в Telegram
-  try {
-    if (photos.length === 1) {
-      const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID'), photo: photos[0] };
-      if (caption) { payload.caption = caption; payload.parse_mode = 'HTML'; }
-      telegram_('sendPhoto', payload);
-    } else {
-      const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID') };
-      const media = photos.map((blob, i) => {
-        payload['p' + i] = blob;
-        const item = { type: 'photo', media: 'attach://p' + i };
-        if (i === 0 && caption) { item.caption = caption; item.parse_mode = 'HTML'; }
-        return item;
-      });
-      payload.media = JSON.stringify(media);
-      telegram_('sendMediaGroup', payload);
+  if (!photos.length) {
+    collect(sendTelegram_(text));
+  } else {
+    const caption = text.length <= 1024 ? text : null; // лимит подписи к фото в Telegram
+    try {
+      if (photos.length === 1) {
+        const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID'), photo: photos[0] };
+        if (caption) { payload.caption = caption; payload.parse_mode = 'HTML'; }
+        collect(telegram_('sendPhoto', payload));
+      } else {
+        const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID') };
+        const media = photos.map((blob, i) => {
+          payload['p' + i] = blob;
+          const item = { type: 'photo', media: 'attach://p' + i };
+          if (i === 0 && caption) { item.caption = caption; item.parse_mode = 'HTML'; }
+          return item;
+        });
+        payload.media = JSON.stringify(media);
+        collect(telegram_('sendMediaGroup', payload));
+      }
+      if (!caption) collect(sendTelegram_(text));
+    } catch (e) {
+      Logger.log('Фото не отправилось: ' + e.message);
+      collect(sendTelegram_(text));
     }
-  } catch (e) {
-    Logger.log('Фото не отправилось: ' + e.message);
-    return sendTelegram_(text);
   }
-  if (!caption) sendTelegram_(text);
+  trackOrder_(o, ids);
 }
 
 /**
@@ -252,7 +313,7 @@ function orderNumber_(orderId) {
     if (orderId) {
       map[orderId] = num;
       const keys = Object.keys(map);
-      if (keys.length > 500) keys.slice(0, keys.length - 500).forEach(k => delete map[k]);
+      if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete map[k]);
     }
     props.setProperties({ ORDER_NUMBERS: JSON.stringify(map), NEXT_ORDER_NUMBER: String(num + 1) });
     return num;
@@ -277,6 +338,124 @@ function fetchPhoto_(url) {
   return null;
 }
 
+// ───────────────────────────── сроки и реакции 👍 ─────────────────────────────
+// Для каждого заказа хранится свойство T_<номер заказа Etsy>:
+//   { n: 1086, id: '4236106400', ship: '2026-11-25', msgs: [id сообщений], ok: [кто поставил 👍] }
+
+function trackOrder_(o, msgIds) {
+  if (!o.orderId) return;
+  const props = PropertiesService.getScriptProperties();
+  const key = 'T_' + o.orderId;
+  let t = {};
+  try { t = JSON.parse(props.getProperty(key) || '{}'); } catch (e) {}
+  t.n = o.num;
+  t.id = o.orderId;
+  t.ship = o.shipDate || t.ship || '';
+  t.chat = String(getProp_('TELEGRAM_CHAT_ID'));
+  t.msgs = Array.from(new Set((t.msgs || []).concat(msgIds))).slice(-20);
+  t.ok = t.ok || [];
+  props.setProperty(key, JSON.stringify(t));
+}
+
+function loadTracked_() {
+  const all = PropertiesService.getScriptProperties().getProperties();
+  return Object.keys(all).filter(k => k.indexOf('T_') === 0).map(k => {
+    try { return JSON.parse(all[k]); } catch (e) { return null; }
+  }).filter(Boolean);
+}
+
+/** Забирает из Telegram новые реакции и отмечает заказы с 👍 как отправленные. */
+function pollReactions_() {
+  const props = PropertiesService.getScriptProperties();
+  const offset = parseInt(props.getProperty('TG_OFFSET') || '0', 10);
+  let data;
+  try {
+    const payload = {
+      timeout: 0,
+      allowed_updates: JSON.stringify(['message', 'my_chat_member', 'message_reaction']),
+    };
+    if (offset) payload.offset = offset;
+    data = telegram_('getUpdates', payload);
+  } catch (e) {
+    Logger.log('Не удалось получить реакции: ' + e.message);
+    return;
+  }
+  const updates = data.result || [];
+  if (!updates.length) return;
+
+  const tracked = loadTracked_();
+  const byMsg = {};
+  tracked.forEach(t => (t.msgs || []).forEach(id => { byMsg[id] = t; })); // бот пишет в одну группу
+  const changed = {};
+  const seen = JSON.parse(props.getProperty('SEEN_CHATS') || '{}');
+
+  updates.forEach(u => {
+    const any = u.message || u.my_chat_member || u.message_reaction;
+    if (any && any.chat) seen[any.chat.id] = any.chat.title || any.chat.username || any.chat.first_name;
+
+    const r = u.message_reaction;
+    if (!r) return;
+    const t = byMsg[r.message_id];
+    if (!t) return;
+    const who = String((r.user && r.user.id) || (r.actor_chat && r.actor_chat.id) || 'anon');
+    const has = list => (list || []).some(x => x.type === 'emoji' && x.emoji === DONE_EMOJI);
+    const before = t.ok.length;
+    if (has(r.new_reaction) && t.ok.indexOf(who) < 0) t.ok.push(who);
+    if (!has(r.new_reaction) && has(r.old_reaction)) t.ok = t.ok.filter(x => x !== who);
+    if (t.ok.length !== before) {
+      if (!t.ok.length) delete t.done;
+      else if (!t.done) t.done = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      changed[t.id] = t;
+    }
+  });
+
+  const save = { TG_OFFSET: String(updates[updates.length - 1].update_id + 1), SEEN_CHATS: JSON.stringify(seen) };
+  Object.keys(changed).forEach(id => { save['T_' + id] = JSON.stringify(changed[id]); });
+  props.setProperties(save);
+}
+
+/** Удаляет записи об отправленных заказах старше 14 дней и любых заказах старше 60 дней. */
+function cleanupTracked_(today) {
+  const props = PropertiesService.getScriptProperties();
+  loadTracked_().forEach(t => {
+    const doneOld = t.done && daysBetween_(t.done, today) > 14;
+    const veryOld = t.ship && daysBetween_(t.ship, today) > 60;
+    if (doneOld || veryOld) props.deleteProperty('T_' + t.id);
+  });
+}
+
+/** «Nov 25» + дата письма → '2026-11-25' (год берётся из даты письма). */
+function shipDate_(shipBy, date) {
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const m = shipBy.match(/([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})/);
+  if (!m || months.indexOf(m[1].toLowerCase()) < 0) return '';
+  const mon = months.indexOf(m[1].toLowerCase());
+  let year = date.getFullYear();
+  if (mon < date.getMonth() - 6) year++; // заказ в декабре, отправка в январе
+  const pad = n => (n < 10 ? '0' : '') + n;
+  return year + '-' + pad(mon + 1) + '-' + pad(+m[2]);
+}
+
+function daysBetween_(a, b) {
+  return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+}
+
+function ruDay_(iso) {
+  const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const p = iso.split('-');
+  return +p[2] + ' ' + months[+p[1] - 1];
+}
+
+/** «1086) #4236106400» — со ссылкой на сообщение в группе, если это супергруппа. */
+function orderRef_(t) {
+  const label = '<b>' + t.n + ')</b> #' + t.id;
+  const chat = String(t.chat || '');
+  if (chat.indexOf('-100') === 0 && t.msgs && t.msgs.length) {
+    return '<a href="https://t.me/c/' + chat.slice(4) + '/' + t.msgs[0] + '">' + label + '</a>';
+  }
+  return label;
+}
+
 // ───────────────────────────── утилиты ─────────────────────────────
 
 function telegram_(method, payload) {
@@ -284,10 +463,20 @@ function telegram_(method, payload) {
   const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/' + method, {
     method: 'post', payload: payload, muteHttpExceptions: true,
   });
+  const body = res.getContentText();
   if (res.getResponseCode() !== 200) {
-    throw new Error('Telegram ответил ' + res.getResponseCode() + ': ' + res.getContentText());
+    // Группа стала супергруппой → у неё новый id. Запоминаем и повторяем.
+    let j = {};
+    try { j = JSON.parse(body); } catch (e) {}
+    const newId = j.parameters && j.parameters.migrate_to_chat_id;
+    if (newId && payload.chat_id) {
+      PropertiesService.getScriptProperties().setProperty('TELEGRAM_CHAT_ID', String(newId));
+      payload.chat_id = String(newId);
+      return telegram_(method, payload);
+    }
+    throw new Error('Telegram ответил ' + res.getResponseCode() + ': ' + body);
   }
-  return JSON.parse(res.getContentText());
+  return JSON.parse(body);
 }
 
 function sendTelegram_(text) {
