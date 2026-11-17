@@ -56,7 +56,7 @@ Etsy → основная почта → (фильтр Gmail) → вторая �
 | Куда | KURA (кровать) | DUKTIG (кухня) | Dollhouse (домик) | TROFAST (ящики) |
 |---|---|---|---|---|
 | Германия | DHL Kleinpaket 35×25×5 см | DHL Kleinpaket 35×25×5 см | DHL Kleinpaket 35×25×5 см | DHL Kleinpaket 35×25×5 см |
-| США | DHL 60 см | DHL 50–60 см | DHL 50–60 см | DHL 50–60 см |
+| США | DHL 60 см | DHL 60 см | DHL 60 см | DHL 60 см |
 | Остальные страны | Warenpost 35×25×5 см | Warenpost 35×25×5 см | Warenpost 35×25×5 см | Warenpost 35×25×5 см |
 
 Если в заказе несколько категорий, берётся первая слева (KURA → DUKTIG → Dollhouse → TROFAST).

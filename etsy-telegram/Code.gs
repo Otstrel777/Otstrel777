@@ -26,11 +26,11 @@ const PACKAGING = [
   { name: 'KURA',      match: /kura/i,
     de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',    other: 'Warenpost 35×25×5 см' },
   { name: 'DUKTIG',    match: /duktig/i,
-    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',   , other: 'Warenpost 35×25×5 см' },
   { name: 'Dollhouse', match: /doll\s*-?house|puppenhaus/i,
-    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',   , other: 'Warenpost 35×25×5 см' },
   { name: 'TROFAST',   match: /trofast/i,
-    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 50–60 см', other: 'Warenpost 35×25×5 см' },
+    de: 'DHL Kleinpaket 35×25×5 см', us: 'DHL 60 см',   , other: 'Warenpost 35×25×5 см' },
 ];
 const TEST_ORDER = 1099;    // какой заказ прислать функцией testOrder: наш номер (1099) или номер Etsy (4236960738)
 const SHEET_PHOTOS = 'add'; // фото из таблицы: 'add' — добавить к фото из письма, 'replace' — вместо них
