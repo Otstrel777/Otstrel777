@@ -47,8 +47,7 @@ function checkNewOrders() {
     threads.reverse().forEach(thread => {
       thread.getMessages().forEach(msg => {
         if (!/You made a sale on Etsy/i.test(msg.getSubject())) return;
-        const order = parseOrder_(msg.getSubject(), msg.getBody());
-        sendTelegram_(formatOrder_(order));
+        sendOrder_(parseOrder_(msg.getSubject(), msg.getBody()));
         Utilities.sleep(500);
       });
       thread.addLabel(label);
@@ -64,7 +63,7 @@ function testLastOrder() {
   if (!threads.length) throw new Error('Писем «You made a sale on Etsy» не найдено');
   const msgs = threads[0].getMessages();
   const msg = msgs[msgs.length - 1];
-  sendTelegram_(formatOrder_(parseOrder_(msg.getSubject(), msg.getBody())));
+  sendOrder_(parseOrder_(msg.getSubject(), msg.getBody()));
   Logger.log('Отправлен заказ: ' + msg.getSubject());
 }
 
@@ -106,6 +105,11 @@ function parseOrder_(subject, html) {
     o.address = lines.join('\n');
   }
 
+  // Фото товаров: <a href=".../transaction/ID"><img src="..."></a>
+  const images = {};
+  const ir = /href="https?:\/\/www\.etsy\.com\/transaction\/(\d+)[^"]*"[^>]*>\s*<img[^>]+src="([^"]+)"/gi;
+  while ((m = ir.exec(html)) !== null) images[m[1]] = decode_(m[2]);
+
   // Товары: ссылка на transaction с текстом = название товара
   const re = /<a[^>]+href="https?:\/\/www\.etsy\.com\/transaction\/(\d+)[^"]*"[^>]*>\s*([^<]+?)\s*<\/a>/gi;
   const found = [];
@@ -131,6 +135,7 @@ function parseOrder_(subject, html) {
       variations: vars,
       quantity: q ? +q[1] : 1,
       price: p ? p[1].trim() : '',
+      image: images[it.id] || '',
     });
   });
 
@@ -199,23 +204,75 @@ function formatOrder_(o) {
   return msg;
 }
 
+// ───────────────────────────── отправка ─────────────────────────────
+
+/** Фото товаров + текст. Если фото не получилось — заказ всё равно уходит текстом. */
+function sendOrder_(o) {
+  const text = formatOrder_(o);
+  const urls = Array.from(new Set(o.items.map(it => it.image).filter(Boolean))).slice(0, 10);
+  const photos = urls.map(fetchPhoto_).filter(Boolean);
+  if (!photos.length) return sendTelegram_(text);
+
+  const caption = text.length <= 1024 ? text : null; // лимит подписи к фото в Telegram
+  try {
+    if (photos.length === 1) {
+      const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID'), photo: photos[0] };
+      if (caption) { payload.caption = caption; payload.parse_mode = 'HTML'; }
+      telegram_('sendPhoto', payload);
+    } else {
+      const payload = { chat_id: getProp_('TELEGRAM_CHAT_ID') };
+      const media = photos.map((blob, i) => {
+        payload['p' + i] = blob;
+        const item = { type: 'photo', media: 'attach://p' + i };
+        if (i === 0 && caption) { item.caption = caption; item.parse_mode = 'HTML'; }
+        return item;
+      });
+      payload.media = JSON.stringify(media);
+      telegram_('sendMediaGroup', payload);
+    }
+  } catch (e) {
+    Logger.log('Фото не отправилось: ' + e.message);
+    return sendTelegram_(text);
+  }
+  if (!caption) sendTelegram_(text);
+}
+
+/** Скачивает фото: сначала большое (570px), если не вышло — миниатюру из письма. */
+function fetchPhoto_(url) {
+  const big = url.replace(/\/il_\d+x\d+\./, '/il_570xN.');
+  for (const u of big !== url ? [big, url] : [url]) {
+    try {
+      const res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
+      if (res.getResponseCode() === 200 && /^image\//.test(res.getHeaders()['Content-Type'] || '')) {
+        return res.getBlob().setName('item.jpg');
+      }
+    } catch (e) {
+      Logger.log('Не удалось скачать ' + u + ': ' + e.message);
+    }
+  }
+  return null;
+}
+
 // ───────────────────────────── утилиты ─────────────────────────────
 
-function sendTelegram_(text) {
+function telegram_(method, payload) {
   const token = getProp_('TELEGRAM_BOT_TOKEN');
-  const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
-    method: 'post',
-    payload: {
-      chat_id: getProp_('TELEGRAM_CHAT_ID'),
-      text: text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: 'true',
-    },
-    muteHttpExceptions: true,
+  const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/' + method, {
+    method: 'post', payload: payload, muteHttpExceptions: true,
   });
   if (res.getResponseCode() !== 200) {
     throw new Error('Telegram ответил ' + res.getResponseCode() + ': ' + res.getContentText());
   }
+  return JSON.parse(res.getContentText());
+}
+
+function sendTelegram_(text) {
+  return telegram_('sendMessage', {
+    chat_id: getProp_('TELEGRAM_CHAT_ID'),
+    text: text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: 'true',
+  });
 }
 
 function getProp_(name) {
