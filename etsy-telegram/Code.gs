@@ -291,6 +291,17 @@ function isBundle_(it) {
   return new RegExp('\\d+\\s*' + size + '[^\\n+&]{0,25}[+&]\\s*\\d+\\s*' + size, 'i').test(text);
 }
 
+/**
+ * Ящики IKEA TROFAST: «Wider Side» в варианте Size — наклейка на длинную сторону.
+ * Для остальных товаров — null (строка не показывается).
+ */
+function trofastSide_(it) {
+  if (!/trofast/i.test(it.title || '')) return null;
+  const size = (it.variations || []).filter(v => /^\s*(size|размер)\b/i.test(v)).join(' ');
+  return /\bwide(r)?[\s-]*side|\bwhite[\s-]*side|\blong[\s-]*side/i.test(size)
+    ? '<b>Длинный ‼️</b>' : 'Обычный';
+}
+
 function plural_(n, one, few, many) {
   const a = n % 10, b = n % 100;
   if (a === 1 && b !== 11) return one;
@@ -313,6 +324,8 @@ function formatOrder_(o) {
       const pm = v.match(/^Personali[sz]ation:\s*([\s\S]*)/i);
       L.push(pm ? '   ✏️ <b>Персонализация:</b> ' + esc_(pm[1]) : '   • ' + esc_(v));
     });
+    const side = trofastSide_(it);
+    if (side) L.push('   📏 ' + side);
     if (it.price) L.push('   ' + esc_(it.price));
     L.push('');
   });
