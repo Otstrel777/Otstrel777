@@ -12,6 +12,7 @@
 
 const QUERY = 'subject:"You made a sale on Etsy" newer_than:3d';
 const LABEL_NAME = 'Etsy/Отправлено в TG';
+const START_NUMBER = 1086; // с какого номера начинать нумерацию заказов
 
 // ───────────────────────────── запуск ─────────────────────────────
 
@@ -164,7 +165,7 @@ function parseOrder_(subject, html) {
 
 function formatOrder_(o) {
   const L = [];
-  L.push('🛍 <b>Новый заказ #' + esc_(o.orderId || '?') + '</b>');
+  L.push((o.num ? '<b>' + o.num + ')</b> ' : '') + '🛍 <b>Новый заказ #' + esc_(o.orderId || '?') + '</b>');
   if (o.shipBy) L.push('📦 Отправить до: <b>' + esc_(ruDate_(o.shipBy)) + '</b>');
   L.push('');
 
@@ -204,6 +205,7 @@ function formatOrder_(o) {
 
 /** Фото товаров + текст. Если фото не получилось — заказ всё равно уходит текстом. */
 function sendOrder_(o) {
+  o.num = orderNumber_(o.orderId);
   const text = formatOrder_(o);
   const urls = Array.from(new Set(o.items.map(it => it.image).filter(Boolean))).slice(0, 10);
   const photos = urls.map(fetchPhoto_).filter(Boolean);
@@ -231,6 +233,32 @@ function sendOrder_(o) {
     return sendTelegram_(text);
   }
   if (!caption) sendTelegram_(text);
+}
+
+/**
+ * Сквозной номер заказа: 1086), 1087), ...
+ * Один и тот же заказ всегда получает один и тот же номер.
+ */
+function orderNumber_(orderId) {
+  const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  const own = !lock.hasLock(); // checkNewOrders уже держит блокировку
+  if (own) lock.waitLock(20000);
+  try {
+    let map = {};
+    try { map = JSON.parse(props.getProperty('ORDER_NUMBERS') || '{}'); } catch (e) {}
+    if (orderId && map[orderId]) return map[orderId];
+    const num = parseInt(props.getProperty('NEXT_ORDER_NUMBER') || START_NUMBER, 10);
+    if (orderId) {
+      map[orderId] = num;
+      const keys = Object.keys(map);
+      if (keys.length > 500) keys.slice(0, keys.length - 500).forEach(k => delete map[k]);
+    }
+    props.setProperties({ ORDER_NUMBERS: JSON.stringify(map), NEXT_ORDER_NUMBER: String(num + 1) });
+    return num;
+  } finally {
+    if (own) lock.releaseLock();
+  }
 }
 
 /** Скачивает фото: сначала большое (570px), если не вышло — миниатюру из письма. */
