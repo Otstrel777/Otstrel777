@@ -465,6 +465,7 @@ function sendOrder_(o) {
   const sendTextAwaitingPhoto = () => {
     const res = sendTelegram_(text);
     collect(res);
+    setTextRef_(o, firstId_(res), false, text);
     const hasPhotoSource = o.items.some(it => it.image) || sheetHasPhotos_(o);
     if (caption && hasPhotoSource && res && res.result && res.result.message_id) {
       markPhotoPending_(o, res.result.message_id, caption);
@@ -479,7 +480,9 @@ function sendOrder_(o) {
   let sent = false;
   for (const attempt of [photos, photos.slice(0, 1)]) { // 2-я попытка — только первое фото
     try {
-      collect(sendPhotos(attempt));
+      const res = sendPhotos(attempt);
+      collect(res);
+      if (caption) setTextRef_(o, firstId_(res), true, text);
       sent = true;
       break;
     } catch (e) {
@@ -488,7 +491,30 @@ function sendOrder_(o) {
     }
   }
   if (!sent) sendTextAwaitingPhoto();
-  else if (!caption) collect(sendTelegram_(text));
+  else if (!caption) {
+    const res = sendTelegram_(text);
+    collect(res);
+    setTextRef_(o, firstId_(res), false, text);
+  }
+}
+
+function firstId_(res) {
+  const r = [].concat(res && res.result || [])[0];
+  return r && r.message_id;
+}
+
+/** Запоминает, в каком сообщении текст заказа (для пометок «+»). */
+function setTextRef_(o, msgId, isCaption, html) {
+  if (!o.orderId || !msgId) return;
+  const props = PropertiesService.getScriptProperties();
+  const key = 'T_' + o.orderId;
+  let t = {};
+  try { t = JSON.parse(props.getProperty(key) || '{}'); } catch (e) {}
+  t.tm = msgId;
+  t.cap = !!isCaption;
+  t.html = html;
+  delete t.notes; // повторная отправка — пометки начинаются заново
+  props.setProperty(key, JSON.stringify(t));
 }
 
 // ───────────────────────────── дозагрузка фото ─────────────────────────────
@@ -543,6 +569,7 @@ function retryPendingPhotos_() {
     p.tries++;
     if (done) {
       Logger.log('Заказ #' + t.id + ': фото добавлено к сообщению');
+      if (t.tm === p.msg) t.cap = true;
       delete t.pending;
     } else if (p.tries >= PHOTO_RETRY_MAX) {
       Logger.log('Заказ #' + t.id + ': фото так и не удалось добавить, оставляю текстом');
@@ -819,6 +846,14 @@ function pollReactions_() {
     const any = u.message || u.my_chat_member || u.message_reaction;
     if (any && any.chat) seen[any.chat.id] = any.chat.title || any.chat.username || any.chat.first_name;
 
+    // Ответ на заказ: «+ текст» — добавить пометку, «-» — убрать последнюю
+    const m = u.message;
+    if (m && m.reply_to_message && typeof m.text === 'string') {
+      const tn = byMsg[m.reply_to_message.message_id];
+      if (tn && handleNote_(tn, m)) changed[tn.id] = tn;
+      return;
+    }
+
     const r = u.message_reaction;
     if (!r) return;
     const t = byMsg[r.message_id];
@@ -865,6 +900,72 @@ function deletedFromChat_(t) {
   PropertiesService.getScriptProperties().deleteProperty('T_' + t.id);
   Logger.log('Заказ ' + t.n + ') #' + t.id + ' удалён из чата — больше не отслеживаю');
   return true;
+}
+
+// ───────────────────────────── пометки к заказу ─────────────────────────────
+// Сообщения бота может редактировать только бот. Поэтому пометку добавляют ответом на заказ:
+//   «+ текст» — дописать «📝 текст (Имя, дата)» в сообщение заказа;  «-» — убрать последнюю пометку.
+
+function handleNote_(t, m) {
+  const txt = m.text.trim();
+  const notes = (t.notes || []).slice();
+  if (/^\+/.test(txt)) {
+    const note = txt.replace(/^\+\s*/, '').trim();
+    if (!note) return false;
+    const who = (m.from && (m.from.first_name || m.from.username)) || '';
+    notes.push({ x: note.slice(0, 300), w: who, d: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM') });
+  } else if (txt === '-' || txt === '−') {
+    if (!notes.length) return false;
+    notes.pop();
+  } else {
+    return false; // обычный ответ — не трогаем
+  }
+
+  const reply = m.reply_to_message;
+  const chat = getProp_('TELEGRAM_CHAT_ID');
+  // Заказы, отправленные старой версией скрипта: берём текст из самого сообщения (без жирного шрифта)
+  if (!t.tm) {
+    const plain = reply.text || reply.caption;
+    if (!plain) {
+      noteError_(m, 'Ответьте на сообщение, где есть текст заказа (на первое фото альбома или на текст).');
+      return false;
+    }
+    t.tm = reply.message_id;
+    t.cap = !reply.text;
+    t.html = esc_(plain);
+  }
+
+  const full = (t.html || '') + (notes.length ? '\n\n' + notes.map(n =>
+    '📝 <b>' + esc_(n.x) + '</b>' + (n.w ? ' <i>(' + esc_(n.w) + ', ' + n.d + ')</i>' : '')).join('\n') : '');
+  if (t.cap && full.length > 1024) {
+    noteError_(m, 'Пометка не поместилась: у сообщения с фото текст не может быть длиннее 1024 символов. Сократите пометку.');
+    return false;
+  }
+  try {
+    if (t.cap) {
+      telegram_('editMessageCaption', { chat_id: chat, message_id: String(t.tm), caption: full, parse_mode: 'HTML' });
+    } else {
+      telegram_('editMessageText', { chat_id: chat, message_id: String(t.tm), text: full, parse_mode: 'HTML',
+        disable_web_page_preview: 'true' });
+    }
+  } catch (e) {
+    if (!/message is not modified/i.test(e.message)) {
+      Logger.log('Заказ #' + t.id + ': не удалось добавить пометку: ' + e.message);
+      noteError_(m, 'Не удалось изменить сообщение заказа: ' + e.message.slice(0, 200));
+      return false;
+    }
+  }
+  t.notes = notes;
+  if (t.pending && full.length <= 1024) t.pending.cap = full;
+  try { telegram_('deleteMessage', { chat_id: chat, message_id: String(m.message_id) }); } catch (e) {} // убрать команду из чата
+  return true;
+}
+
+function noteError_(m, text) {
+  try {
+    telegram_('sendMessage', { chat_id: getProp_('TELEGRAM_CHAT_ID'), text: '⚠️ ' + text,
+      reply_to_message_id: String(m.message_id) });
+  } catch (e) {}
 }
 
 /** Удаляет записи об отправленных заказах старше 14 дней и любых заказах старше 60 дней. */
