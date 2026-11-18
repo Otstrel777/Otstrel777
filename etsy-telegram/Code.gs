@@ -463,7 +463,14 @@ function sendOrder_(o) {
 
   // Заказ ушёл текстом, хотя фото должно быть → запомнить, чтобы позже добавить фото в это же сообщение
   const sendTextAwaitingPhoto = () => {
-    const res = sendTelegram_(text);
+    let res;
+    try {
+      res = sendTelegram_(text);
+    } catch (e) {
+      if (isRejected_(e)) throw e; // Telegram явно отказал — заказ не ушёл, повторим в следующий запуск
+      markUnsure_(o, e);           // непонятный ответ — сообщение могло дойти, повторно не шлём
+      return;
+    }
     collect(res);
     setTextRef_(o, firstId_(res), false, text);
     const hasPhotoSource = o.items.some(it => it.image) || sheetHasPhotos_(o);
@@ -487,6 +494,10 @@ function sendOrder_(o) {
       break;
     } catch (e) {
       Logger.log('Заказ #' + o.orderId + ': фото не отправилось (' + attempt.length + ' шт.): ' + e.message);
+      if (!isRejected_(e)) { // ответ непонятный: Telegram мог принять сообщение — не дублируем
+        markUnsure_(o, e);
+        return;
+      }
       Utilities.sleep(2000);
     }
   }
@@ -496,6 +507,26 @@ function sendOrder_(o) {
     collect(res);
     setTextRef_(o, firstId_(res), false, text);
   }
+}
+
+/**
+ * Telegram явно отказал (код 400–499, кроме 429 «слишком часто»): сообщение точно не отправлено,
+ * можно пробовать ещё раз. Всё остальное (сбой связи, таймаут, 5xx) — ответ непонятен:
+ * сообщение могло дойти, поэтому повторно не отправляем.
+ */
+function isRejected_(e) {
+  return !!(e && e.tgCode >= 400 && e.tgCode < 500);
+}
+
+/** Заказ мог уйти, но Telegram не подтвердил — запоминаем, чтобы не отправить второй раз. */
+function markUnsure_(o, e) {
+  Logger.log('Заказ #' + o.orderId + ': Telegram не подтвердил отправку (' + e.message +
+    ') — повторно не шлю, чтобы не было дублей. Если заказа нет в чате — testOrder ' + o.num);
+  trackOrder_(o, []);
+  const props = PropertiesService.getScriptProperties();
+  const t = JSON.parse(props.getProperty('T_' + o.orderId) || '{}');
+  t.unsure = true;
+  props.setProperty('T_' + o.orderId, JSON.stringify(t));
 }
 
 function firstId_(res) {
@@ -584,7 +615,7 @@ function alreadySent_(orderId) {
   if (!orderId) return false;
   try {
     const t = JSON.parse(PropertiesService.getScriptProperties().getProperty('T_' + orderId) || '{}');
-    return !!(t.msgs && t.msgs.length);
+    return !!((t.msgs && t.msgs.length) || t.unsure);
   } catch (e) {
     return false;
   }
@@ -849,6 +880,10 @@ function pollReactions_() {
     // Ответ на заказ: «+ текст» — добавить пометку, «-» — убрать последнюю
     const m = u.message;
     if (m && m.reply_to_message && typeof m.text === 'string') {
+      if (!byMsg[m.reply_to_message.message_id]) {
+        const linked = linkUnsure_(tracked, m.reply_to_message);
+        if (linked) { byMsg[m.reply_to_message.message_id] = linked; changed[linked.id] = linked; }
+      }
       const tn = byMsg[m.reply_to_message.message_id];
       if (tn && handleNote_(tn, m)) changed[tn.id] = tn;
       return;
@@ -905,6 +940,23 @@ function deletedFromChat_(t) {
 // ───────────────────────────── пометки к заказу ─────────────────────────────
 // Сообщения бота может редактировать только бот. Поэтому пометку добавляют ответом на заказ:
 //   «+ текст» — дописать «📝 текст (Имя, дата)» в сообщение заказа;  «-» — убрать последнюю пометку.
+
+/**
+ * Заказ, у которого Telegram не подтвердил отправку (unsure), не связан с сообщением в чате.
+ * Если кто-то ответил на сообщение бота, в тексте которого есть «#номер» такого заказа, — связываем.
+ */
+function linkUnsure_(tracked, reply) {
+  const plain = reply.text || reply.caption || '';
+  const t = tracked.filter(x => x.unsure && plain.indexOf('#' + x.id) >= 0)[0];
+  if (!t) return null;
+  t.msgs = [reply.message_id];
+  t.tm = reply.message_id;
+  t.cap = !reply.text;
+  t.html = esc_(plain);
+  delete t.unsure;
+  Logger.log('Заказ ' + t.n + ') #' + t.id + ' привязан к сообщению в чате');
+  return t;
+}
 
 function handleNote_(t, m) {
   const txt = m.text.trim();
@@ -1003,6 +1055,8 @@ function ruDay_(iso) {
 /** «1086) #4236106400» — со ссылкой на сообщение в группе, если это супергруппа. */
 function orderRef_(t) {
   const label = '<b>' + t.n + ')</b> #' + t.id;
+  if (t.unsure) return label + ' <i>(бот не видит этот заказ в чате — ответьте на него «+ ок», ' +
+    'тогда 👍 начнёт считаться; если заказа в чате нет — запустите testOrder ' + t.n + ')</i>';
   const chat = String(t.chat || '');
   if (chat.indexOf('-100') === 0 && t.msgs && t.msgs.length) {
     return '<a href="https://t.me/c/' + chat.slice(4) + '/' + t.msgs[0] + '">' + label + '</a>';
@@ -1028,7 +1082,9 @@ function telegram_(method, payload) {
       payload.chat_id = String(newId);
       return telegram_(method, payload);
     }
-    throw new Error('Telegram ответил ' + res.getResponseCode() + ': ' + body);
+    const err = new Error('Telegram ответил ' + res.getResponseCode() + ': ' + body);
+    err.tgCode = res.getResponseCode();
+    throw err;
   }
   return JSON.parse(body);
 }
